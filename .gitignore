@@ -1,6 +1,3 @@
-# IOS image repository — contains large binary files
-ios_repository/
-
 # Python cache files
 __pycache__/
 
@@ -11,8 +8,17 @@ cancel_transfer_TEMP.py
 documentation/
 
 # VS-Code Workspace
- CrayonEaters_Tactical-CiscoIOS-Updater.code-workspace
+CrayonEaters_Tactical-CiscoIOS-Updater.code-workspace
 
 # Avoid ignoring IOS Image repository and subfolders, but we will ignore image files
-ios_repository/**
-!ios_repository/*/
+ios_repository/C8KV/*
+!ios_repository/C8KV/.gitignore
+
+ios_repository/C9200/*
+!ios_repository/9200/.gitignore
+
+ios_repository/PacStar444/*
+!ios_repository/PacStar444/.gitignore
+
+ios_repository/PacStar447/*
+!ios_repository/PacStar447/.gitignore
