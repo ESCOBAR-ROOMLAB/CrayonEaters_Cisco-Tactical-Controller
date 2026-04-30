@@ -14,7 +14,7 @@ of Cisco devices using a combination of RESTCONF (for version retrieval), SSH/CL
 4. [Project Structure](#project-structure)
 5. [Excel Tracker Setup](#excel-tracker-setup)
 6. [IOS Repository Setup](#ios-repository-setup)
-7. [Running the Application with Python](#running-the-application)
+7. [Running the Application with Python](#running-the-application-with-python)
 8. [Workflow Reference](#workflow-reference)
 9. [Logging](#logging)
 10. [Bugs & Issues Found](#bugs--issues-found)
