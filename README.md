@@ -1,4 +1,4 @@
-# Cisco Tactical Updater — CrayonEaters Series
+# Cisco Tactical Controller — CrayonEaters Series
 
 A PyQt5 GUI application that automates IOS-XE firmware upgrades across a fleet
 of Cisco devices using a combination of RESTCONF (for version retrieval), SSH/CLI
@@ -68,11 +68,11 @@ aiohttp>=3.13.5
 
 ### Network requirements
 
-| Protocol | Port | Direction         | Purpose                              |
-|----------|------|-------------------|--------------------------------------|
-| SSH      | 22   | Updater → Device  | CLI, SCP transfer                    |
-| HTTPS    | 443  | Updater → Device  | RESTCONF version retrieval           |
-| OOBM     | —    | Out-of-band mgmt  | All connections go via OOBM IP       |
+| Protocol | Port | Direction            | Purpose                              |
+|----------|------|----------------------|--------------------------------------|
+| SSH      | 22   | Controller → Device  | CLI, SCP transfer                    |
+| HTTPS    | 443  | Controller → Device  | RESTCONF version retrieval           |
+| OOBM     | —    | Out-of-band mgmt     | All connections go via OOBM IP       |
 
 SSL certificate validation is disabled (`ssl=False`) — use only on a trusted
 management network.
@@ -90,7 +90,7 @@ management network.
 
 ```bash
 git clone <repo-url>
-cd cisco-tactical-updater
+cd <repo-name>
 pip install -r requirements.txt
 ```
 
@@ -103,7 +103,7 @@ their required formats.
 ## Project Structure
 
 ```
-cisco-tactical-updater/
+cisco-tactical-controller/
 │
 ├── program_gui.py                  # Entry point — PyQt5 main window and workers
 ├── excel_and_data_ops.py           # All DataFrame and Excel I/O operations
