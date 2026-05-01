@@ -1,4 +1,4 @@
-# Cisco Tactical Controller — CrayonEaters Series
+# Cisco Tactical Controller
 
 A PyQt5 GUI application that automates IOS-XE firmware upgrades across a fleet
 of Cisco devices using a combination of RESTCONF (for version retrieval), SSH/CLI
