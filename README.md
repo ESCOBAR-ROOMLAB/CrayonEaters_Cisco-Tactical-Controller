@@ -186,31 +186,31 @@ python program_gui.py
 
 ### Step-by-step GUI walkthrough
 <br/>
-1. **Enter the Excel sheet name** in the text field at the top (e.g. `LAN`).
+1. Enter the Excel sheet name in the text field at the top (e.g. `LAN`).
 <br/>
 <br/>
-2. **Click `SHOW ELIGIBLE DEVICES`.**
+2. Click `SHOW ELIGIBLE DEVICES`.
 <br/>
 <br/>
-3. **Enter device credentials** in the popup (username + password).  
+3. Enter device credentials in the popup (username + password).  
    The tool connects to all devices over SSH,
    checks versions and flash space, then populates the Excel tracker.
 <br/>
 <br/>
-4. **Review the table.** Only devices that pass all eligibility checks appear:
+4. Review the table. Only devices that pass all eligibility checks appear:
    ONLINE, AUTH_OK, RESTCONF OPERATIVE, IOS image present locally, enough
    flash space, and current version differs from recommended.
 <br/>
 <br/>
-5. **Select devices** using the checkboxes (or click `ALL`).
+5. Select devices using the checkboxes (or click `ALL`).
 <br/>
 <br/>
-6. **Click `START UPDATE`.**
+6. Click `START UPDATE`.
 <br/>
 <br/>
-7. **Choose the transfer mode:**
-   - **Sequential** — one device at a time; safe, readable progress per device.
-   - **Threaded** — all devices simultaneously; faster but progress output overlaps.
+7. Choose the transfer mode:
+   - Sequential — one device at a time; safe, readable progress per device.
+   - Threaded — all devices simultaneously; faster but progress output overlaps.
 <br/>
 <br/>
 8. The tool runs the full install sequence autonomously. A summary dialog appears
