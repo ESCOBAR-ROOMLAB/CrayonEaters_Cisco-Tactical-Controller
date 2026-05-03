@@ -1,8 +1,8 @@
 # Cisco Tactical Controller
 
-A PyQt5 GUI application that automates IOS-XE firmware upgrades across a fleet
-of Cisco devices using a combination of RESTCONF (for version retrieval), SSH/CLI
-(for SCP enablement, flash checks, install commands), and SCP (for image transfer).
+A PyQt5 GUI application that acts as a network controller and automates IOS-XE firmware 
+upgrades across a fleet of Cisco devices using a combination of RESTCONF (for version retrieval), 
+SSH/CLI (for SCP enablement, flash checks, install commands), and SCP (for image transfer).
 
 ---
 
@@ -23,8 +23,8 @@ of Cisco devices using a combination of RESTCONF (for version retrieval), SSH/CL
 
 ## Overview
 
-The tool reads a device inventory from an Excel workbook, connects to each device
-over SSH, retrieves the running IOS version via RESTCONF, compares it against a 
+The tool can operate as a Commmand Pusher or as an Updater. It reads a device inventory from an Excel workbook, 
+connects to each device over SSH, retrieves the running IOS version via RESTCONF, compares it against a 
 recommended version stored in the sheet, and orchestrates the full install-mode upgrade 
 sequence:
 

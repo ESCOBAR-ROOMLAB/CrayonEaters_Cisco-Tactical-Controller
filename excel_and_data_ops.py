@@ -152,7 +152,7 @@ def valid_devices_dataframe(all_devices_df):
     ### <=== HANDLE COLUMN INDEX ISSUES DUE TO MISSING COLUMNS ===> ###
     expected_columns = [
         'Current IOS Version', 'Needs Update', 'Update IOS File Present', 'Enough Flash Space',
-        'Status', 'Auth Status', 'Transfer Result', 'Install Status', 'Update Result', 'Cleaned Inactive'
+        'Status', 'Auth Status', 'RESTCONF Status', 'SCP Enabled', 'Transfer Result', 'Install Status', 'Update Result', 'Cleaned Inactive'
     ]
     
     # Handle situations where a column might be missing
@@ -304,7 +304,6 @@ def populate_restconf_status_column(valid_devices_df, username, password, timeou
     RETURN VALUE
     ------------
     None if successful, or an error code string on failure:
-        - "NO_ELIGIBLE_DEVICES_ERROR": No ONLINE/AUTH_OK devices to poll
         - "RESTCONF_TIMEOUT_ERROR"   : All eligible devices failed RESTCONF check
         - "UNEXPECTED_ERROR"         : An unexpected exception occurred
     """
@@ -315,13 +314,6 @@ def populate_restconf_status_column(valid_devices_df, username, password, timeou
             (valid_devices_df['Status'] == 'ONLINE') &
             (valid_devices_df['Auth Status'] == 'AUTH_OK')
         ]
-
-        # Check if there are any devices to poll
-        if eligible_devices.empty:
-            # Still populate N/A for all rows
-            for index, row in valid_devices_df.iterrows():
-                valid_devices_df.at[index, 'RESTCONF Status'] = 'N/A'
-            return "NO_ELIGIBLE_DEVICES_ERROR"
 
         # Returns {ip: True/False} — True if RESTCONF became operative, False if timed out
         restconf_results = asyncio.run(device_api_ops.get_all_restconf_status(
@@ -360,7 +352,76 @@ def populate_restconf_status_column(valid_devices_df, username, password, timeou
     except Exception as e:
         return "UNEXPECTED_ERROR"
 
+
+# POPULATE SCP STATUS
+# -------------------
+def populate_scp_status_column(valid_devices_df, username, password):
+ 
+    """
+    PURPOSE
+    -------
+    Checks whether 'ip scp server enable' is present in the running config
+    of all ONLINE/AUTH_OK devices and populates the 'SCP Enabled' column
+    with 'ENABLED', 'DISABLED', 'AUTH_BAD', or 'OFFLINE'. Devices that are
+    not ONLINE/AUTH_OK receive 'N/A' without an SSH attempt.
+ 
+ 
+    ARGUMENTS
+    ---------
+    valid_devices_df (pd.DataFrame): DataFrame containing at minimum 'OOBM IP Address', 'Hostname', 'Status', and 'Auth Status' columns.
+    username         (str):          Device SSH username.
+    password         (str):          Device SSH password.
+ 
+ 
+    RETURN VALUE
+    ------------
+    None on success, or an error code string on failure:
+        'ALL_DEVICES_FAILED_ERROR'  — Every eligible device returned DISABLED, AUTH_BAD, or OFFLINE.
+        'UNEXPECTED_ERROR'          — An unhandled exception occurred.
+    """
+ 
+    try:
+        # Only check devices that are reachable and authenticated
+        eligible_devices = valid_devices_df[
+            (valid_devices_df['Status'] == 'ONLINE') &
+            (valid_devices_df['Auth Status'] == 'AUTH_OK')
+        ]
+ 
+        # Write N/A for all non-eligible devices upfront
+        for index, row in valid_devices_df.iterrows():
+            if row['Status'] != 'ONLINE' or row['Auth Status'] != 'AUTH_OK':
+                valid_devices_df.at[index, 'SCP Enabled'] = 'N/A'
+
+        # Call the method to check the SCP status
+        results = device_cli_ops.check_scp_status_all(eligible_devices, username, password)
         
+        # Initialize the counter
+        enabled_count = 0
+ 
+        for index, scp_status in results:
+            valid_devices_df.at[index, 'SCP Enabled'] = scp_status
+            if scp_status == 'YES':
+                enabled_count += 1
+
+        # Determine the count of devices with SCP enabled
+        total_eligible = len(eligible_devices)
+        #----------------------------------------------------------------------------------------------
+        logger.info(f"SCP check complete: {enabled_count}/{total_eligible} device(s) have SCP enabled")
+        #----------------------------------------------------------------------------------------------
+
+        # Handle the situation where all devices have SCP disabled
+        if enabled_count == 0 and total_eligible > 0:
+            return 'ALL_DEVICES_FAILED_ERROR'
+ 
+        return None  # Success — at least one device has SCP enabled
+ 
+    except Exception as e:
+        #-------------------------------------------------------------------
+        logger.error(f"Unexpected error in populate_scp_status_column: {e}")
+        #-------------------------------------------------------------------
+        return 'UNEXPECTED_ERROR'
+
+
 # POPULATE CURRENT VERSION COLUMN
 # -------------------------------
 def populate_current_version_column(valid_devices_df, username, password):
@@ -382,7 +443,6 @@ def populate_current_version_column(valid_devices_df, username, password):
     RETURN VALUE
     ------------
     None if successful, or an error code string on failure:
-        - "NO_OPERATIVE_DEVICES_ERROR": No devices with OPERATIVE RESTCONF status
         - "VERSION_RETRIEVAL_FAILED_ERROR": All operative devices failed version retrieval
         - "UNEXPECTED_ERROR": An unexpected exception occurred
     """
@@ -390,15 +450,6 @@ def populate_current_version_column(valid_devices_df, username, password):
     try:
         # Run all the checks on online devices with operative RESTCONF only
         online_devices = valid_devices_df[valid_devices_df['RESTCONF Status'] == 'OPERATIVE']
-        
-        # Check if there are any devices to query
-        if online_devices.empty:
-            #------------------------------------------------------------------------------------------
-            logger.error("No devices with OPERATIVE RESTCONF status available for version retrieval")
-            #------------------------------------------------------------------------------------------
-            # Still populate empty strings for all rows
-            valid_devices_df['Current IOS Version'] = ''
-            return "NO_OPERATIVE_DEVICES_ERROR"
         
         results = asyncio.run(device_api_ops.get_all_versions(online_devices, username, password))
         
@@ -886,13 +937,14 @@ def get_eligible_devices_df(valid_devices_df):
 
     RETURN VALUE
     ------------
-    New DataFrame containing only eligible devices.
+    New DataFrame containing only eligible devices or "ELIGIBLE_DEVICES_EMPTY" if no devices meet the criteria.
     """
 
     # Apply conditions for eligibility
     eligible_mask = (
         (valid_devices_df['Status'] == 'ONLINE')                &   # Device responded to SSH — reachable and alive
         (valid_devices_df['RESTCONF Status'] == 'OPERATIVE')    &   # Device responded to the test API call
+        (valid_devices_df['SCP Enabled'] == 'YES')              &   # Device has SCP enabled on the run-time configuration
         (valid_devices_df['Current IOS Version'].notna())       &   # Current IOS version was successfully retrieved from the device
         (valid_devices_df['Enough Flash Space'] == 'YES')       &   # Sufficient flash space available to store the image
         (valid_devices_df['IOS Image Path'].notna())            &   # A matching IOS image file was found in the local repository
@@ -902,6 +954,14 @@ def get_eligible_devices_df(valid_devices_df):
 
     # Define the eligible devices out of the argumented DataFrame
     eligible_devices_df = valid_devices_df[eligible_mask].copy()
+
+    # It can happen that all devices ar not eligible for different reasons, resulting in the excpetions for ALL devices failures on 
+    # a particular check step to not be raised. Therefore, here we catch that exception.
+    if eligible_devices_df.empty:
+        #---------------------------------------------------------------------------------------------
+        logger.info(f"0 devices eligible for IOS update out of {len(valid_devices_df)} valid devices")
+        #---------------------------------------------------------------------------------------------
+        return "ELIGIBLE_DEVICES_EMPTY"
 
     #------------------------------------------------------------------------------------------------------------------------
     logger.info(f"{len(eligible_devices_df)} device(s) eligible for IOS update out of {len(valid_devices_df)} valid devices")
@@ -1590,6 +1650,8 @@ def update_excel_tracker(excel_file, excel_sheet_name, valid_devices_df):
         hostname_col_index = -1
         current_ios_col_index = -1
         status_col_index = -1
+        restconf_status_col_index = -1
+        scp_enabled_col_index = -1
         auth_status_col_index = -1
         enough_flash_space_col_index = -1
         needs_update_col_index = -1
@@ -1610,6 +1672,10 @@ def update_excel_tracker(excel_file, excel_sheet_name, valid_devices_df):
                 status_col_index = column
             elif header == "Auth Status":
                 auth_status_col_index  = column
+            elif header == "RESTCONF Status":
+                restconf_status_col_index = column
+            elif header == "SCP Enabled":
+                scp_enabled_col_index = column
             elif header == "Enough Flash Space":
                 enough_flash_space_col_index = column
             elif header == "Needs Update":
@@ -1629,6 +1695,8 @@ def update_excel_tracker(excel_file, excel_sheet_name, valid_devices_df):
         version_lookup = dict(zip(valid_devices_df['Hostname'], valid_devices_df['Current IOS Version']))
         status_lookup = dict(zip(valid_devices_df['Hostname'], valid_devices_df['Status']))
         auth_status_lookup = dict(zip(valid_devices_df['Hostname'], valid_devices_df['Auth Status']))
+        restconf_status_lookup = dict(zip(valid_devices_df['Hostname'], valid_devices_df['RESTCONF Status']))
+        scp_enabled_lookup = dict(zip(valid_devices_df['Hostname'], valid_devices_df['SCP Enabled']))
         enough_flash_space_lookup = dict(zip(valid_devices_df['Hostname'], valid_devices_df['Enough Flash Space']))
         needs_update_lookup = dict(zip(valid_devices_df['Hostname'], valid_devices_df['Needs Update']))
         update_ios_file_present_lookup = dict(zip(valid_devices_df['Hostname'], valid_devices_df['Update IOS File Present']))
@@ -1643,6 +1711,8 @@ def update_excel_tracker(excel_file, excel_sheet_name, valid_devices_df):
             'Current IOS Version':     current_ios_col_index,
             'Status':                  status_col_index,
             'Auth Status':             auth_status_col_index,
+            'RESTCONF Status':         restconf_status_col_index,
+            'SCP Enabled':             scp_enabled_col_index,
             'Enough Flash Space':      enough_flash_space_col_index,
             'Needs Update':            needs_update_col_index,
             'Update IOS File Present': update_ios_file_present_col_index,
@@ -1667,6 +1737,8 @@ def update_excel_tracker(excel_file, excel_sheet_name, valid_devices_df):
                 worksheet.cell(row=row, column=current_ios_col_index, value=version_lookup[hostname])
                 worksheet.cell(row=row, column=status_col_index, value=status_lookup[hostname])
                 worksheet.cell(row=row, column=auth_status_col_index, value=auth_status_lookup[hostname])
+                worksheet.cell(row=row, column=restconf_status_col_index, value=restconf_status_lookup[hostname])
+                worksheet.cell(row=row, column=scp_enabled_col_index, value=scp_enabled_lookup[hostname])
                 worksheet.cell(row=row, column=enough_flash_space_col_index, value=enough_flash_space_lookup[hostname])
                 worksheet.cell(row=row, column=needs_update_col_index, value=needs_update_lookup[hostname])
                 worksheet.cell(row=row, column=update_ios_file_present_col_index, value=update_ios_file_present_lookup[hostname])

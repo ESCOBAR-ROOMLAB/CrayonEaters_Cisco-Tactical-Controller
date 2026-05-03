@@ -22,7 +22,10 @@ from PyQt5.QtWidgets import (
     QAbstractItemView,  # Base class providing selection and interaction behaviors for item views
     QDialog,            # Base class for modal dialog windows (error dialogs, credentials popup)
     QMessageBox,        # Convenience class for displaying standard message boxes (warnings, info)
-    QSizePolicy         # Controls how a widget resizes relative to its layout container
+    QSizePolicy,        # Controls how a widget resizes relative to its layout container
+    QPlainTextEdit,      # Multi-line plain text input area for displaying or editing large amounts of unformatted text
+    QScrollArea,        # Scrollable container — used in PushCommandsDialog for the horizontal device tab bar
+    QStackedWidget      # Container that shows one child widget at a time — used for phase switching in PushCommandsDialog
 )
 
 # PyQt5 core classes for non-GUI functionality and application fundamentals
@@ -39,7 +42,8 @@ from PyQt5.QtCore import (
 from PyQt5.QtGui import (
     QFont,       # Defines font family, size, weight, and style for text rendering
     QColor,      # Represents RGB color values used in stylesheets and custom painting
-    QPalette     # Manages color groups (active, inactive, disabled) for widget states
+    QPalette,    # Manages color groups (active, inactive, disabled) for widget states
+    QTextCursor  # Controls selection, insertion, deletion, and navigation within QPlainTextEdit or QTextEdit
 )
 
 # Custom module containing Excel file operations and validation functions
@@ -112,6 +116,13 @@ DANGER_DIM     = "#2a0808"      # dark scarlet tint — subtle danger background
 
 BTN_DISABLED   = "#1a2050"      # dark navy — background for disabled START button
 BTN_DIS_TEXT   = "#3a4878"      # muted navy-silver — text color for disabled buttons
+
+SUCCESS_GREEN  = "#33cc66"      # clear green — result state label in PushCommandsDialog
+ 
+GREEN          = "#1a8a40"      # base dark green — PUSH and PUSH MORE button base
+GREEN_MID      = "#22aa50"      # mid green — gradient midpoint
+GREEN_LIGHT    = "#2acc60"      # lighter green — hover state
+GREEN_SHINE    = "#44ee80"      # shine highlight — top of hover gradient
 
 ###################################################################################################################################
 
@@ -587,17 +598,152 @@ class ErrorDialog(QDialog):
         hint_label.setAlignment(Qt.AlignCenter)  # Centered horizontally
         layout.addWidget(hint_label)
 
+# DIALOG BOX FOR WARNING MESSAGES
+# --------------------------------
+class WarningDialog(QDialog):
+ 
+    """
+    Modal dialog for displaying non-fatal warning messages to the user.
+ 
+    Styled with a gold/amber theme to visually distinguish warnings from
+    the scarlet error dialogs. The workflow continues after dismissal —
+    no action is required from the user beyond closing the window.
+    """
+ 
+    ### <=== STYLESHEET AND INITIALIZATION ===> ###
+    def __init__(self, title, message, parent=None):
+ 
+        """
+        PURPOSE
+        -------
+        Initialize the warning dialog with a title and message.
+ 
+        Uses the same layout structure as ErrorDialog but with a gold accent
+        to communicate non-fatal severity. Auto-sizes to fit the message content.
+ 
+ 
+        ARGUMENTS
+        ---------
+        title   (str):                  The dialog window title, displayed in the header row.
+        message (str):                  The warning message to display. Supports multi-line content.
+        parent  (QWidget, optional):    Parent widget for modal behavior. Defaults to None.
+ 
+ 
+        RETURN VALUE
+        ------------
+        None
+        """
+ 
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(500)
+        self.setModal(True)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+ 
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {BG_PANEL};
+                border: 2px solid {GOLD};
+            }}
+            QLabel {{
+                color: {SILVER_BRIGHT};
+                font-size: 12px;
+                font-family: 'Courier New', monospace;
+                letter-spacing: 0px;
+            }}
+            QLabel#warnTitle {{
+                color: {GOLD_LIGHT};
+                font-size: 14px;
+                font-family: 'Courier New', monospace;
+                font-weight: bold;
+                letter-spacing: 1px;
+            }}
+        """)
+ 
+        self._setup_ui(title, message)
+        self.adjustSize()
+ 
+ 
+    ### <=== LAYOUT MANAGER ===> ###
+    def _setup_ui(self, title, message):
+ 
+        """
+        PURPOSE
+        -------
+        Build and arrange all child widgets inside the dialog.
+ 
+        Mirrors the ErrorDialog layout: icon + title header, gold separator,
+        word-wrapped message body, and a bottom hint label.
+ 
+ 
+        ARGUMENTS
+        ---------
+        title   (str): Displayed in uppercase alongside the warning icon.
+        message (str): Warning body text. Word wrap is enabled.
+ 
+ 
+        RETURN VALUE
+        ------------
+        None — modifies the dialog layout in place.
+        """
+ 
+        layout = QVBoxLayout(self)
+        layout.setSpacing(16)
+        layout.setContentsMargins(24, 20, 24, 20)
+ 
+        # === HEADER ROW: Icon + Title ===
+        header_row = QHBoxLayout()
+        header_row.setSpacing(10)
+ 
+        warn_icon = QLabel("⚠")
+        warn_icon.setStyleSheet(f"color: {GOLD_LIGHT}; font-size: 24px;")
+        header_row.addWidget(warn_icon)
+ 
+        title_label = QLabel(title.upper())
+        title_label.setObjectName("warnTitle")
+        header_row.addWidget(title_label)
+        header_row.addStretch()
+ 
+        layout.addLayout(header_row)
+ 
+        # === GOLD SEPARATOR ===
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet(f"background-color: {GOLD}; max-height: 1px; border: none;")
+        layout.addWidget(sep)
+ 
+        # === WARNING MESSAGE ===
+        message_label = QLabel(message)
+        message_label.setWordWrap(True)
+        message_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        message_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        layout.addWidget(message_label)
+ 
+        layout.addStretch()
+ 
+        # === BOTTOM HINT ===
+        hint_label = QLabel("Close this window to continue")
+        hint_label.setStyleSheet(f"""
+            color: {TEXT_MUTED};
+            font-size: 10px;
+            font-style: italic;
+        """)
+        hint_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(hint_label)
+
 
 # DIALOG BOX FOR CREDENTIALS
 # --------------------------
-class CredentialsDialog(QDialog):
+class Credentials_and_mode_Dialog(QDialog):
 
     """
-    Modal dialog window for collecting device authentication credentials.
+    Modal dialog window for collecting device authentication credentials and mode of operation.
     
     Prompts the user to enter a username and password that will be used
     to authenticate against all Cisco devices listed in the Excel sheet.
     The password field includes a visibility toggle (eye icon) button.
+
+    It also lets the user choos between UPDATER or COMMAND PUSHER modes.
     """
 
     ### <=== STYLESHEET AND INITIALIZATION ===> ###
@@ -606,11 +752,15 @@ class CredentialsDialog(QDialog):
         """
         PURPOSE
         -------
-        Initialize the credentials dialog window with input fields and submit button.
+        Initialize the credentials and mode dialog window with input fields, mode selection,
+        and a submit button.
         
         Creates a modal dialog that collects device authentication credentials
-        (username and password) from the user. The dialog features the USMC
-        navy/scarlet/gold theme with a visibility toggle for the password field.
+        (username and password) and the desired operation mode (UPDATER or
+        COMMAND PUSHER) from the user. The dialog features the USMC
+        navy/scarlet/gold theme with a visibility toggle for the password
+        field and mutually exclusive mode buttons. The SUBMIT button remains
+        disabled until both credentials are supplied and a mode is chosen.
         
 
         ARGUMENTS
@@ -625,7 +775,7 @@ class CredentialsDialog(QDialog):
 
         super().__init__(parent)
         self.setWindowTitle("Device Credentials")
-        self.setFixedSize(470, 260)
+        self.setFixedSize(470, 360)
         self.setModal(True) # Blocks interaction with main window until dialog is closed
         
         # Remove question mark from title bar (Windows)
@@ -703,6 +853,15 @@ class CredentialsDialog(QDialog):
                 border-bottom: 1px solid #6a5010;
             }}
 
+            /* SUBMIT button disabled */
+            QPushButton:disabled {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #6a5a2a, stop:0.4 #5a4a20, stop:1 #4a3a18);
+                color: #2a2a0a;
+                border: 1px solid #5a4a20;
+                border-bottom: 2px solid #3a2a10;
+            }}
+
             /* Eye icon button for password visibility */
             QPushButton#btnToggle {{
                 background: {BORDER_LIGHT};
@@ -718,8 +877,52 @@ class CredentialsDialog(QDialog):
                 background: {BORDER};
                 color: {SILVER_BRIGHT};
             }}
+
+            /* Mode buttons — unselected (dark navy) */
+            QPushButton#btnModeUpdater,
+            QPushButton#btnModePusher {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #1a2260, stop:1 {BG_PANEL});
+                color: {SILVER_DIM};
+                border: 1px solid {BORDER_LIGHT};
+                border-bottom: 2px solid {BORDER};
+                border-radius: 4px;
+                padding: 6px 10px;
+                font-size: 10px;
+                font-family: 'Courier New', monospace;
+                font-weight: bold;
+                letter-spacing: 1px;
+            }}
+ 
+            /* Mode buttons — hover */
+            QPushButton#btnModeUpdater:hover,
+            QPushButton#btnModePusher:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #2a3a88, stop:1 #1e2d70);
+                color: {SILVER};
+            }}
+
+            /* UPDATER selected — gold */
+            QPushButton#btnModeUpdater:checked {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {GOLD_LIGHT}, stop:0.4 #d4a840, stop:1 {GOLD});
+                color: #0a0f2e;
+                border: 1px solid {GOLD};
+                border-bottom: 2px solid #8a6818;
+            }}
+ 
+            /* COMMAND PUSHER selected — silver/blue */
+            QPushButton#btnModePusher:checked {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {SILVER_BRIGHT}, stop:0.4 {SILVER}, stop:1 #a0b0cc);
+                color: #0a0f2e;
+                border: 1px solid {SILVER};
+                border-bottom: 2px solid #7080a0;
+            }}
+
         """)
         
+        self._mode   = None  # Stores the selected operation mode
         self._setup_ui() # Build and arrange all dialog widgets
         self._username = "" # Stores validated username after submission
         self._password = "" # Stores validated password after submission
@@ -734,11 +937,14 @@ class CredentialsDialog(QDialog):
         Create and arrange the dialog's UI components.
         
         Builds the visual structure of the credentials dialog using a vertical
-        box layout. The dialog consists of:
+        box layout. The dialog now consists of:
             - Instructional info label at the top
             - Username input field with label
             - Password input field with label and visibility toggle button (👁)
-            - SUBMIT button at the bottom
+            - OPERATION MODE row with two mutually exclusive checkable buttons:
+                🔧 UPDATER and 📡 COMMAND PUSHER
+            - SUBMIT button at the bottom (disabled until both credentials
+                are entered AND a mode is selected)
         
 
         ARGUMENTS
@@ -769,6 +975,7 @@ class CredentialsDialog(QDialog):
         self.user_input = QLineEdit()
         self.user_input.setPlaceholderText("Enter username...")
         self.user_input.setFixedHeight(32)  # Match eye button height
+        self.user_input.textChanged.connect(self._update_submit_state)  # Re-evaluate gate, ensure that some text is in it
         user_layout.addWidget(self.user_input)
         layout.addLayout(user_layout)
         
@@ -784,6 +991,7 @@ class CredentialsDialog(QDialog):
         self.pass_input.setPlaceholderText("Enter password...")
         self.pass_input.setEchoMode(QLineEdit.Password)  # Mask input with bullets
         self.pass_input.setFixedHeight(32)  # Match eye button height
+        self.pass_input.textChanged.connect(self._update_submit_state)  # Re-evaluate gate, ensure that some text is in it
         pass_row.addWidget(self.pass_input)
         
         self.btn_toggle = QPushButton("👁")  # Eye icon for visibility toggle
@@ -797,12 +1005,43 @@ class CredentialsDialog(QDialog):
         pass_layout.addLayout(pass_row)
         layout.addLayout(pass_layout)
         
-        layout.addSpacing(8)  # Extra space before submit button
-        
+        # === MODE SELECTION ===
+        # Allow the user to choose between firmware-update and command‑push modes.
+        mode_layout = QVBoxLayout()
+        mode_label = QLabel("OPERATION MODE")
+        mode_layout.addWidget(mode_label)
+
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(8)  # space between the two buttons
+
+        # UPDATER button – runs the full IOS upgrade pipeline
+        self.btn_mode_updater = QPushButton("🔧 UPDATER")
+        self.btn_mode_updater.setObjectName("btnModeUpdater")  # CSS selector
+        self.btn_mode_updater.setFixedHeight(32)               # compact button
+        self.btn_mode_updater.setCheckable(True)               # stays pressed when selected
+        self.btn_mode_updater.setCursor(Qt.PointingHandCursor) # hand cursor on hover
+        self.btn_mode_updater.clicked.connect(lambda: self._on_mode_selected('updater'))
+
+        # COMMAND PUSHER button – pushes a single config command set
+        self.btn_mode_pusher = QPushButton("📡 COMMAND PUSHER")
+        self.btn_mode_pusher.setObjectName("btnModePusher")  # CSS selector
+        self.btn_mode_pusher.setFixedHeight(32)              # compact button
+        self.btn_mode_pusher.setCheckable(True)              # stays pressed when selected
+        self.btn_mode_pusher.setCursor(Qt.PointingHandCursor)# hand cursor on hover
+        self.btn_mode_pusher.clicked.connect(lambda: self._on_mode_selected('command_pusher'))
+
+        mode_row.addWidget(self.btn_mode_updater)
+        mode_row.addWidget(self.btn_mode_pusher)
+        mode_layout.addLayout(mode_row)
+        layout.addLayout(mode_layout)
+
+        layout.addSpacing(4)  # extra breathing room before the submit button
+  
         # === SUBMIT BUTTON ===
         self.btn_submit = QPushButton("SUBMIT")
         self.btn_submit.setFixedHeight(29)
         self.btn_submit.setCursor(Qt.PointingHandCursor)  # Hand cursor on hover
+        self.btn_submit.setEnabled(False)  # Gated — requires credentials + mode
         self.btn_submit.clicked.connect(self._on_submit)
         layout.addWidget(self.btn_submit)
 
@@ -836,6 +1075,68 @@ class CredentialsDialog(QDialog):
         else:  # Button is not pressed
             self.pass_input.setEchoMode(QLineEdit.Password)  # Mask with bullets
             self.btn_toggle.setText("👁")  # Eye icon = password hidden
+
+
+    ### <=== MODE SELECTION ===> ###
+    def _on_mode_selected(self, mode):
+ 
+        """
+        PURPOSE
+        -------
+        Handle a mode button click. Ensures mutual exclusivity between the two
+        mode buttons (only one can be checked at a time), stores the selection,
+        and re-evaluates the Submit gate.
+ 
+        
+        ARGUMENTS
+        ---------
+        mode (str): 'updater' or 'command_pusher'
+ 
+        
+        RETURN VALUE
+        ------------
+        None
+        """
+ 
+        self._mode = mode
+ 
+        # Enforce mutual exclusivity manually — QButtonGroup would work too but
+        # this keeps things explicit and avoids extra imports
+        self.btn_mode_updater.setChecked(mode == 'updater')
+        self.btn_mode_pusher.setChecked(mode == 'command_pusher')
+ 
+        self._update_submit_state()
+ 
+ 
+    ### <=== SUBMIT GATE ===> ###
+    def _update_submit_state(self):
+ 
+        """
+        PURPOSE
+        -------
+        Enable the Submit button only when all three conditions are met:
+            1. Username field is non-empty
+            2. Password field is non-empty
+            3. An operation mode has been selected
+ 
+        Called on every textChanged signal from both input fields and after
+        every mode button click.
+ 
+        
+        ARGUMENTS
+        ---------
+        None
+ 
+        
+        RETURN VALUE
+        ------------
+        None
+        """
+ 
+        has_user = bool(self.user_input.text().strip())
+        has_pass = bool(self.pass_input.text().strip())
+        has_mode = self._mode is not None
+        self.btn_submit.setEnabled(has_user and has_pass and has_mode)
 
 
     ### <=== CREDENTIAL VARIABLES MANAGEMENT ===> ###
@@ -917,6 +1218,29 @@ class CredentialsDialog(QDialog):
 
         return self._username, self._password
     
+
+    ### <=== MODE VARIABLE MANAGEMENT ===> ###
+    # Returns the selected operation mode
+    def get_mode(self):
+ 
+        """
+        PURPOSE
+        -------
+        Return the selected operation mode after dialog acceptance.
+ 
+        
+        ARGUMENTS
+        ---------
+        None
+ 
+        
+        RETURN VALUE
+        ------------
+        str: 'updater' or 'command_pusher'
+        """
+ 
+        return self._mode
+
 
 # DIALOG BOX FOR TRANSFER MODE SELECTION
 # --------------------------------------
@@ -1097,7 +1421,18 @@ class TransferModeDialog(QDialog):
         PURPOSE
         -------
         Handle Sequential button click. Sets selected_mode and closes dialog.
+
+        
+        ARGUMENTS
+        ---------
+        None
+        
+
+        RETURN VALUE
+        ------------
+        None
         """
+
         self.selected_mode = "sequential"
         self.accept()  # Closes dialog with QDialog.Accepted result
 
@@ -1107,7 +1442,18 @@ class TransferModeDialog(QDialog):
         PURPOSE
         -------
         Handle Threaded button click. Sets selected_mode and closes dialog.
+
+        
+        ARGUMENTS
+        ---------
+        None
+        
+
+        RETURN VALUE
+        ------------
+        None
         """
+
         self.selected_mode = "threaded"
         self.accept()  # Closes dialog with QDialog.Accepted result
 
@@ -1290,6 +1636,786 @@ class SummaryDialog(QDialog):
 
 ###################################################################################################################################
 
+# PUSH COMMANDS DIALOG
+# --------------------
+class PushCommandsDialog(QDialog):
+ 
+    """
+    Modal dialog for entering and pushing exec-mode CLI commands to selected devices.
+
+    Lifecycle managed via QStackedWidget (three pages):
+        Phase 0 — Input   : user types commands; PUSH button gates on content.
+        Phase 1 — Pushing : 'Pushing...' label shown; worker runs on background thread.
+        Phase 2 — Output  : per-device tab bar + read-only output area + PUSH MORE button.
+
+    Closing without pushing (X button) is allowed in phases 0 and 2.
+    Closing is blocked in phase 1 while the worker is running.
+    """
+
+    MAX_LINES    = 20  # Hard ceiling on the number of command lines
+    _PHASE_INPUT   = 0  # QStackedWidget page index — input phase
+    _PHASE_PUSHING = 1  # QStackedWidget page index — pushing phase
+    _PHASE_OUTPUT  = 2  # QStackedWidget page index — output phase
+ 
+    ### <=== STYLESHEET AND INITIALIZATION ===> ###
+    def __init__(self, parent=None):
+ 
+        """
+        PURPOSE
+        -------
+        Initialize the dialog, apply the stylesheet, and build all three phase
+        pages inside a QStackedWidget. Opens on phase 0 (input).
+
+
+        ARGUMENTS
+        ---------
+        parent (QWidget, optional): Parent widget for modal behavior. Defaults to None.
+
+
+        RETURN VALUE
+        ------------
+        None
+        """
+ 
+        # Basic settings
+        super().__init__(parent)
+        self.setWindowTitle("Push Commands")
+        self.setFixedSize(700, 520)
+        self.setModal(True)
+
+        # Remove the '?' help button from the title bar on Windows
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint) 
+
+        # Runtime state
+        self._pushing      = False  # True while worker is running — blocks closeEvent
+        self._results      = {}     # {df_index: result_str} — populated by _on_push_finished
+        self._tab_buttons  = {}     # {df_index: QPushButton} — device tab buttons
+        self._active_index = None   # df_index of the currently selected device tab
+
+        # Worker/thread references — populated in _on_push_clicked
+        self._push_thread = None
+        self._push_worker = None
+ 
+        # Some style here...
+        self.setStyleSheet(f"""
+ 
+            QDialog {{
+                background-color: {BG_PANEL};
+                border: 2px solid {ACCENT};
+            }}
+
+            /* Phase 0 — 'Enter commands:' label */
+            QLabel#cmdLabel {{
+                color: {GOLD_LIGHT};
+                font-size: 12px;
+                font-weight: bold;
+                font-family: 'Courier New', monospace;
+                letter-spacing: 1px;
+            }}
+
+            /* Phase 1 — 'Pushing...' centered label */
+            QLabel#statusLabel {{
+                color: {SILVER_BRIGHT};
+                font-size: 16px;
+                font-family: 'Courier New', monospace;
+                font-weight: bold;
+                letter-spacing: 2px;
+            }}
+
+            /* Phase 2 — 'COMMAND OUTPUT' header */
+            QLabel#outputHeader {{
+                color: {GOLD_LIGHT};
+                font-size: 13px;
+                font-weight: bold;
+                font-family: 'Courier New', monospace;
+                letter-spacing: 2px;
+            }}
+
+            /* Command input editor (phase 0) and output area (phase 2) */
+            QPlainTextEdit {{
+                background-color: {BG_BASE};
+                color: {SILVER_BRIGHT};
+                font-size: 12px;
+                font-family: 'Courier New', monospace;
+                border: 1px solid {BORDER_LIGHT};
+                border-radius: 4px;
+                padding: 6px;
+                selection-background-color: {ACCENT};
+            }}
+
+            /* Tab scroll area — transparent so panel background shows through */
+            QScrollArea {{
+                background-color: transparent;
+                border: none;
+            }}
+            QScrollArea > QWidget > QWidget {{
+                background-color: transparent;
+            }}
+
+            /* Device tab button — inactive */
+            QPushButton#tabBtn {{
+                background-color: {BG_BASE};
+                color: {SILVER_DIM};
+                border: 1px solid {BORDER};
+                border-radius: 3px;
+                padding: 4px 14px;
+                font-size: 11px;
+                font-family: 'Courier New', monospace;
+                font-weight: bold;
+            }}
+            QPushButton#tabBtn:hover {{
+                background-color: {BORDER_LIGHT};
+                color: {SILVER_BRIGHT};
+            }}
+
+            /* Device tab button — active (gold) */
+            QPushButton#tabBtnActive {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {GOLD_LIGHT}, stop:1 {GOLD});
+                color: {BG_BASE};
+                border: 1px solid {GOLD};
+                border-bottom: 2px solid #7a6020;
+                border-radius: 3px;
+                padding: 4px 14px;
+                font-size: 11px;
+                font-family: 'Courier New', monospace;
+                font-weight: bold;
+            }}
+
+            /* PUSH button — green, enabled */
+            QPushButton#pushBtn {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {GREEN_LIGHT}, stop:0.4 {GREEN_MID}, stop:1 {GREEN});
+                color: {SILVER_BRIGHT};
+                border: 1px solid {GREEN};
+                border-bottom: 2px solid #0d4a22;
+                border-radius: 4px;
+                padding: 8px 28px;
+                font-size: 11px;
+                font-family: 'Courier New', monospace;
+                font-weight: bold;
+                letter-spacing: 1px;
+            }}
+            QPushButton#pushBtn:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {GREEN_SHINE}, stop:0.4 {GREEN_LIGHT}, stop:1 {GREEN_MID});
+            }}
+            QPushButton#pushBtn:pressed {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {GREEN}, stop:1 #0d4a22);
+                border-bottom: 1px solid #082a14;
+            }}
+            QPushButton#pushBtn:disabled {{
+                background: {BTN_DISABLED};
+                color: {BTN_DIS_TEXT};
+                border: 1px solid {BORDER};
+                border-bottom: 2px solid {BORDER};
+            }}
+
+            /* PUSH MORE button — same green as PUSH */
+            QPushButton#pushMoreBtn {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {GREEN_LIGHT}, stop:0.4 {GREEN_MID}, stop:1 {GREEN});
+                color: {SILVER_BRIGHT};
+                border: 1px solid {GREEN};
+                border-bottom: 2px solid #0d4a22;
+                border-radius: 4px;
+                padding: 8px 28px;
+                font-size: 11px;
+                font-family: 'Courier New', monospace;
+                font-weight: bold;
+                letter-spacing: 1px;
+            }}
+            QPushButton#pushMoreBtn:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {GREEN_SHINE}, stop:0.4 {GREEN_LIGHT}, stop:1 {GREEN_MID});
+            }}
+            QPushButton#pushMoreBtn:pressed {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {GREEN}, stop:1 #0d4a22);
+                border-bottom: 1px solid #082a14;
+            }}
+        """)
+ 
+        # Build all three phase pages and wire the stack
+        self._setup_ui()
+ 
+ 
+    ### <=== CLOSE EVENT GUARD ===> ###
+    def closeEvent(self, event):
+
+        """
+        PURPOSE
+        -------
+        Block closing while the worker is running. Allowed in phases 0 and 2.
+
+
+        ARGUMENTS
+        ---------
+        event (QCloseEvent): The Qt close event.
+
+
+        RETURN VALUE
+        ------------
+        None
+        """
+
+        if self._pushing:
+            event.ignore()   # Push in progress — swallow the close request
+        else:
+            event.accept()   # Safe to close in phases 0 and 2
+ 
+ 
+    ### <=== LAYOUT MANAGER ===> ###
+    def _setup_ui(self):
+
+        """
+        PURPOSE
+        -------
+        Build all three phase pages inside a QStackedWidget and attach it
+        to the dialog. Phase transitions are handled by setCurrentIndex().
+
+
+        ARGUMENTS
+        ---------
+        None
+
+
+        RETURN VALUE
+        ------------
+        None
+        """
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)  # Stack fills the dialog edge-to-edge
+        root.setSpacing(0)
+
+        self._stack = QStackedWidget()  # One page visible at a time — controls phase transitions
+        root.addWidget(self._stack)
+
+        # Each builder returns a QWidget page; index order must match _PHASE_* constants
+        self._stack.addWidget(self._build_phase_input())    # index 0 — _PHASE_INPUT
+        self._stack.addWidget(self._build_phase_pushing())  # index 1 — _PHASE_PUSHING
+        self._stack.addWidget(self._build_phase_output())   # index 2 — _PHASE_OUTPUT
+
+        self._stack.setCurrentIndex(self._PHASE_INPUT)  # Dialog opens on the input phase
+ 
+ 
+    ### <=== PHASE 0: INPUT PAGE ===> ###
+    def _build_phase_input(self):
+
+        """
+        PURPOSE
+        -------
+        Build and return the input phase page widget containing the
+        'Enter commands:' label, the QPlainTextEdit editor, and the
+        centered green PUSH button.
+
+
+        ARGUMENTS
+        ---------
+        None
+
+
+        RETURN VALUE
+        ------------
+        QWidget: The fully constructed input phase page.
+        """
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        # Section label — tells the user what the editor expects
+        self._lbl_cmd = QLabel("Enter commands:")
+        self._lbl_cmd.setObjectName("cmdLabel")
+        layout.addWidget(self._lbl_cmd)
+
+        # Multi-line command editor — no word wrap so each line stays as one command
+        self._editor = QPlainTextEdit()
+        self._editor.setLineWrapMode(QPlainTextEdit.NoWrap)              # One command per line, no soft wrap
+        self._editor.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # H-scroll when a line is too long
+        self._editor.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)    # V-scroll when lines exceed visible height
+        self._editor.setTabChangesFocus(True)                             # Tab moves focus to PUSH instead of inserting a tab character
+        self._editor.setPlaceholderText("  one command per line  |  max 20 lines")
+        self._editor.textChanged.connect(self._on_text_changed)          # Live line-cap and button gating on every keystroke
+        layout.addWidget(self._editor)
+
+        # PUSH button — starts disabled; _on_text_changed enables it when content exists
+        self._btn_push = QPushButton("PUSH")
+        self._btn_push.setObjectName("pushBtn")
+        self._btn_push.setFixedHeight(36)
+        self._btn_push.setEnabled(False)
+        self._btn_push.setCursor(Qt.PointingHandCursor)
+        self._btn_push.clicked.connect(self._on_push_clicked)
+
+        btn_row = QHBoxLayout()          # Horizontal row used only to center the button
+        btn_row.addStretch()             # Left stretch — pushes button to center
+        btn_row.addWidget(self._btn_push)
+        btn_row.addStretch()             # Right stretch — mirrors left
+        layout.addLayout(btn_row)
+
+        return page
+
+
+    ### <=== PHASE 1: PUSHING PAGE ===> ###
+    def _build_phase_pushing(self):
+
+        """
+        PURPOSE
+        -------
+        Build and return the pushing phase page widget showing a vertically
+        centered 'Pushing...' label while the worker runs.
+
+
+        ARGUMENTS
+        ---------
+        None
+
+
+        RETURN VALUE
+        ------------
+        QWidget: The fully constructed pushing phase page.
+        """
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(24, 20, 24, 20)
+
+        # Status label — displayed centered while push_commands_all runs in background
+        self._lbl_status = QLabel("Pushing...")
+        self._lbl_status.setObjectName("statusLabel")
+        self._lbl_status.setAlignment(Qt.AlignCenter)
+
+        layout.addStretch()                 # Top stretch — pushes label down to vertical center
+        layout.addWidget(self._lbl_status)
+        layout.addStretch()                 # Bottom stretch — mirrors top
+
+        return page
+
+
+    ### <=== PHASE 2: OUTPUT PAGE ===> ###
+    def _build_phase_output(self):
+
+        """
+        PURPOSE
+        -------
+        Build and return the output phase page widget containing:
+            - 'COMMAND OUTPUT' header label
+            - Scarlet horizontal separator
+            - Horizontally-scrolling device tab bar (QScrollArea)
+            - Read-only QPlainTextEdit for device output
+            - Centered green PUSH MORE button
+
+        Device tab buttons are populated later by _build_device_tabs() once
+        set_push_context() has been called with the actual device DataFrame.
+
+
+        ARGUMENTS
+        ---------
+        None
+
+
+        RETURN VALUE
+        ------------
+        QWidget: The fully constructed output phase page.
+        """
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(24, 16, 24, 20)
+        layout.setSpacing(10)
+
+        # Section header
+        lbl_header = QLabel("COMMAND OUTPUT")
+        lbl_header.setObjectName("outputHeader")
+        layout.addWidget(lbl_header)
+
+        # Visual separator — scarlet line below the header
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet(f"background-color: {ACCENT}; max-height: 1px; border: none;")
+        layout.addWidget(sep)
+
+        # Device tab bar — inner widget holds the buttons in a horizontal layout
+        self._tab_inner = QWidget()
+        self._tab_layout = QHBoxLayout(self._tab_inner)
+        self._tab_layout.setContentsMargins(2, 4, 2, 4)
+        self._tab_layout.setSpacing(6)
+        self._tab_layout.addStretch()  # Trailing stretch — keeps buttons anchored left as new ones are inserted before it
+
+        # QScrollArea wraps the inner widget — horizontal scroll only, fixed height for one row of buttons
+        self._tab_scroll = QScrollArea()
+        self._tab_scroll.setWidget(self._tab_inner)
+        self._tab_scroll.setWidgetResizable(True)                                    # Inner widget resizes with content
+        self._tab_scroll.setFixedHeight(46)                                          # Tall enough for one button row plus scrollbar
+        self._tab_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)          # H-scroll appears when buttons overflow
+        self._tab_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)           # Never scroll vertically
+        self._tab_scroll.setFrameShape(QFrame.NoFrame)                               # No visible border around the scroll area
+        layout.addWidget(self._tab_scroll)
+
+        # Output text area — read-only; content is set by _show_device_output on tab clicks
+        self._output_area = QPlainTextEdit()
+        self._output_area.setReadOnly(True)
+        self._output_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)         # H-scroll for long output lines
+        self._output_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)           # V-scroll when output exceeds visible height
+        self._output_area.setLineWrapMode(QPlainTextEdit.NoWrap)                     # No soft wrap — output lines stay as-is
+        layout.addWidget(self._output_area)
+
+        # PUSH MORE button — returns to phase 0 with a cleared editor
+        self._btn_push_more = QPushButton("PUSH MORE")
+        self._btn_push_more.setObjectName("pushMoreBtn")
+        self._btn_push_more.setFixedHeight(36)
+        self._btn_push_more.setCursor(Qt.PointingHandCursor)
+        self._btn_push_more.clicked.connect(self._on_push_more_clicked)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(self._btn_push_more)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        return page
+
+
+     ### <=== DEVICE TAB BUILDER ===> ###
+    
+   
+    ### <=== DEVICE TAB BUILDER ===> ###
+    def _build_device_tabs(self):
+
+        """
+        PURPOSE
+        -------
+        Populate the device tab bar with one button per device in _selected_df.
+        Called from set_push_context() and again on each PUSH MORE cycle.
+        Clears any previously built tabs before rebuilding.
+
+
+        ARGUMENTS
+        ---------
+        None
+
+
+        RETURN VALUE
+        ------------
+        None
+        """
+
+        # Reset state — wipe the previous run's buttons and active selection
+        self._tab_buttons.clear()
+        self._active_index = None
+
+        # Drain existing button widgets — keep the trailing stretch (always the last item)
+        while self._tab_layout.count() > 1:
+            item = self._tab_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()  # Schedule for safe deletion on the next event loop cycle
+
+        # Build one tab button per device, inserted before the trailing stretch
+        for idx, row in self._selected_df.iterrows():
+            hostname = row['Hostname']
+            btn = QPushButton(hostname)
+            btn.setObjectName("tabBtn")          # Inactive style by default
+            btn.setFixedHeight(30)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda checked, i=idx: self._select_device_tab(i))  # Capture idx by value — avoids late-binding closure bug
+            self._tab_buttons[idx] = btn
+            self._tab_layout.insertWidget(self._tab_layout.count() - 1, btn)        # Insert before the trailing stretch
+
+
+    ### <=== DEVICE TAB SELECTOR ===> ###
+    def _select_device_tab(self, index):
+
+        """
+        PURPOSE
+        -------
+        Highlight the selected device tab (gold) and dim all others,
+        then populate the output area with that device's result.
+
+
+        ARGUMENTS
+        ---------
+        index: DataFrame index of the device whose tab was clicked.
+
+
+        RETURN VALUE
+        ------------
+        None
+        """
+
+        self._active_index = index  # Track which device is currently displayed
+
+        for idx, btn in self._tab_buttons.items():
+            # Active tab gets gold style; all others get the dimmed navy style
+            btn.setObjectName("tabBtnActive" if idx == index else "tabBtn")
+            # Qt does not re-evaluate the stylesheet automatically when objectName changes —
+            # unpolish + polish forces it to re-read and re-apply the updated selector
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+
+        self._show_device_output(index)  # Refresh the output area for the selected device
+
+
+    ### <=== DEVICE OUTPUT DISPLAY ===> ###
+    def _show_device_output(self, index):
+
+        """
+        PURPOSE
+        -------
+        Populate the output area with the stored result for the given device.
+
+
+        ARGUMENTS
+        ---------
+        index: DataFrame index of the device to display.
+
+
+        RETURN VALUE
+        ------------
+        None
+        """
+
+        result   = self._results.get(index, "No result recorded")   # Fall back gracefully if index is somehow missing
+        hostname = self._selected_df.at[index, 'Hostname']           # .at[] for fast scalar lookup by label
+        ip       = self._selected_df.at[index, 'OOBM IP Address']
+
+        self._output_area.setPlainText(
+            f"Device  :  {hostname}  ({ip})\n"
+            f"{'─' * 40}\n"
+            f"Result  :  {result}\n"
+        )
+
+
+    ### <=== TEXT CHANGE HANDLER ===> ###
+    def _on_text_changed(self):
+
+        """
+        PURPOSE
+        -------
+        Enforce the 20-line hard limit and gate the PUSH button on every
+        keystroke or paste event.
+
+
+        ARGUMENTS
+        ---------
+        None
+
+
+        RETURN VALUE
+        ------------
+        None
+        """
+
+        lines = self._editor.toPlainText().splitlines()
+
+        if len(lines) > self.MAX_LINES:
+            # blockSignals prevents this setPlainText from re-triggering _on_text_changed recursively
+            self._editor.blockSignals(True)
+            self._editor.setPlainText("\n".join(lines[:self.MAX_LINES]))  # Truncate to first 20 lines
+            cursor = self._editor.textCursor()
+            cursor.movePosition(QTextCursor.End)    # Move cursor to end so typing continues from line 20
+            self._editor.setTextCursor(cursor)
+            self._editor.blockSignals(False)        # Re-enable signals after the forced overwrite
+            lines = lines[:self.MAX_LINES]          # Use truncated list for the button gate below
+
+        # Enable PUSH only when at least one line has non-whitespace content
+        self._btn_push.setEnabled(any(line.strip() for line in lines))
+
+
+    ### <=== PUSH CLICKED HANDLER ===> ###
+    def _on_push_clicked(self):
+
+        """
+        PURPOSE
+        -------
+        Collect the command list, switch to phase 1 (Pushing...), and start
+        the PushCommandsWorker on a background QThread.
+
+
+        ARGUMENTS
+        ---------
+        None
+
+
+        RETURN VALUE
+        ------------
+        None
+        """
+
+        commands = self.get_commands()  # Grab clean command list before switching away from the input phase
+
+        self._pushing = True                               # Block closeEvent for the duration of the push
+        self._stack.setCurrentIndex(self._PHASE_PUSHING)  # Switch to the "Pushing..." page
+
+        # Standard Qt worker-on-thread pattern
+        self._push_thread = QThread()
+        self._push_worker = PushCommandsWorker(
+            self._selected_df,
+            self._username,
+            self._password,
+            commands
+        )
+        self._push_worker.moveToThread(self._push_thread)
+        self._push_thread.started.connect(self._push_worker.run)           # Thread start triggers worker.run
+        self._push_worker.finished.connect(self._on_push_finished)         # Results flow back to the dialog
+        self._push_worker.error.connect(self._on_push_error)               # Unhandled worker exceptions surface here
+        self._push_worker.finished.connect(self._push_thread.quit)         # Stop the thread when done
+        self._push_worker.error.connect(self._push_thread.quit)
+        self._push_thread.finished.connect(self._push_worker.deleteLater)  # Qt cleans up objects after thread exits
+        self._push_thread.finished.connect(self._push_thread.deleteLater)
+        self._push_thread.start()
+
+
+    ### <=== PUSH FINISHED HANDLER ===> ###
+    def _on_push_finished(self, results):
+
+        """
+        PURPOSE
+        -------
+        Store per-device results, auto-select the first device tab, and
+        switch to phase 2 (output).
+
+
+        ARGUMENTS
+        ---------
+        results (list): List of (index, result_str) tuples from push_commands_all.
+
+
+        RETURN VALUE
+        ------------
+        None
+        """
+
+        self._pushing = False                                                   # Unblock closeEvent
+        self._results = {index: result for index, result in results}            # Index by df_index for fast tab lookup
+
+        self._build_device_tabs()  # Rebuild tabs — clears any buttons from a previous PUSH MORE cycle
+
+        if self._tab_buttons:
+            first_index = next(iter(self._tab_buttons))  # iter() respects dict insertion order — first device in
+            self._select_device_tab(first_index)         # Auto-select and display first device on entry to phase 2
+
+        self._stack.setCurrentIndex(self._PHASE_OUTPUT)  # Transition to the output phase
+
+
+    ### <=== PUSH ERROR HANDLER ===> ###
+    def _on_push_error(self, error_msg):
+
+        """
+        PURPOSE
+        -------
+        Called when the worker emits an unhandled exception. Populates all
+        device results with the error message and transitions to phase 2.
+
+
+        ARGUMENTS
+        ---------
+        error_msg (str): Exception string from the worker.
+
+
+        RETURN VALUE
+        ------------
+        None
+        """
+
+        self._pushing = False
+
+        # Worker-level errors mean nothing ran at all — mark every device with the same error
+        # (contrast with push_commands return codes, which are per-device and surface normally via results)
+        self._results = {
+            idx: f"WORKER ERROR: {error_msg}"
+            for idx in self._selected_df.index
+        }
+
+        self._build_device_tabs()
+
+        if self._tab_buttons:
+            first_index = next(iter(self._tab_buttons))
+            self._select_device_tab(first_index)
+
+        self._stack.setCurrentIndex(self._PHASE_OUTPUT)
+
+
+    ### <=== PUSH MORE HANDLER ===> ###
+    def _on_push_more_clicked(self):
+
+        """
+        PURPOSE
+        -------
+        Return to phase 0 with a cleared editor and a disabled PUSH button,
+        ready for a new set of commands against the same device selection.
+
+
+        ARGUMENTS
+        ---------
+        None
+
+
+        RETURN VALUE
+        ------------
+        None
+        """
+
+        self._editor.clear()               # PUSH MORE always starts with a fresh editor
+        self._btn_push.setEnabled(False)   # Gate resets — user must type content before pushing again
+        self._stack.setCurrentIndex(self._PHASE_INPUT)
+
+
+    ### <=== CREDENTIALS / DEVICE INJECTION ===> ###
+    def set_push_context(self, selected_df, username, password):
+
+        """
+        PURPOSE
+        -------
+        Inject the device DataFrame and credentials before exec_() is called.
+        Pre-builds the device tab bar so it is ready when phase 2 is shown.
+
+
+        ARGUMENTS
+        ---------
+        selected_df (pd.DataFrame): Devices selected by the user in the table.
+        username    (str):          Device SSH username.
+        password    (str):          Device SSH password.
+
+
+        RETURN VALUE
+        ------------
+        None
+        """
+
+        self._selected_df = selected_df
+        self._username    = username
+        self._password    = password
+        self._build_device_tabs()  # Pre-build tabs here so phase 2 renders instantly without a rebuild on entry
+
+
+    ### <=== PUBLIC GETTER ===> ###
+    def get_commands(self):
+
+        """
+        PURPOSE
+        -------
+        Return the validated list of commands from the editor, blank lines removed.
+
+
+        ARGUMENTS
+        ---------
+        None
+
+
+        RETURN VALUE
+        ------------
+        list[str]: Non-empty command lines in order.
+        """
+
+        # splitlines handles all line endings; the filter drops blank and whitespace-only lines
+        return [line for line in self._editor.toPlainText().splitlines() if line.strip()]
+
+###################################################################################################################################
+
 # MAIN WINDOW
 # -----------
 class MainWindow(QMainWindow):
@@ -1333,9 +2459,10 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(STYLESHEET)
 
         # Internal state tracking
-        self._all_checked    = False  # SELECT ALL toggle state
-        self._update_running = False  # Update workflow in progress flag
-        self._selected_for_update = set()  # Row indices selected when START clicked
+        self._all_checked           = False  # SELECT ALL toggle state
+        self._update_running        = False  # Update workflow in progress flag
+        self._selected_for_update   = set()  # Row indices selected when START clicked
+        self._mode                  = None   # Active operation mode: 'updater' or 'command_pusher'
 
         # Credential storage for device authentication
         self._device_username = ""
@@ -1356,8 +2483,12 @@ class MainWindow(QMainWindow):
         root.setSpacing(14)  # Space between major sections
 
         # === TITLE BLOCK ===
-        title_block = QVBoxLayout()
-        title_block.setSpacing(2)  # Tight spacing between title and subtitle
+        # Outer horizontal row: title/subtitle stack on the left, mode indicator on the right
+        title_row = QHBoxLayout()
+        title_row.setSpacing(0)
+
+        title_text_block = QVBoxLayout()
+        title_text_block.setSpacing(2)  # Tight spacing between title and subtitle
 
         title = QLabel("CISCO TACTICAL CONTROLLER")
         title.setObjectName("appTitle")  # ID for stylesheet targeting
@@ -1365,9 +2496,25 @@ class MainWindow(QMainWindow):
         subtitle = QLabel("CRAYONEATERS SERIES")
         subtitle.setObjectName("appSubtitle")  # ID for stylesheet targeting
 
-        title_block.addWidget(title)
-        title_block.addWidget(subtitle)
-        root.addLayout(title_block)
+        title_text_block.addWidget(title)
+        title_text_block.addWidget(subtitle)
+ 
+        title_row.addLayout(title_text_block)
+        title_row.addStretch()  # Pushes mode label to the right
+
+        # Mode indicator — starts empty, updated when a mode is selected
+        self._mode_label = QLabel("")
+        self._mode_label.setObjectName("modeIndicator")
+        self._mode_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self._mode_label.setStyleSheet(f"""
+            color: {TEXT_MUTED};
+            font-size: 9px;
+            font-family: 'Courier New', monospace;
+            letter-spacing: 2px;
+        """)
+        title_row.addWidget(self._mode_label)
+ 
+        root.addLayout(title_row)
 
         # Scarlet/gold shimmer separator (decorative line)
         sep = QFrame()
@@ -1457,6 +2604,10 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Interactive)
         self.table.setColumnWidth(4, 149)  # Target Version
 
+        # Hide the 'Current Version' and 'Target Version' columns initially
+        self.table.setColumnHidden(3, True)
+        self.table.setColumnHidden(4, True)
+
         # Scrollbar policies
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -1476,28 +2627,16 @@ class MainWindow(QMainWindow):
 
         root.addWidget(table_panel, stretch=1)  # Table panel expands to fill space
 
-        # === BOTTOM BUTTONS ===
-        bottom = QHBoxLayout()
-        bottom.setSpacing(12)  # Space between buttons
-
-        self.btn_cancel = QPushButton("CANCEL UPDATE")
-        self.btn_cancel.setObjectName("btnCancel")
-        self.btn_cancel.setFixedHeight(44)
-        self.btn_cancel.setCursor(Qt.PointingHandCursor)
-        self.btn_cancel.setEnabled(False)  # Disabled until update starts
-        self.btn_cancel.clicked.connect(self._on_cancel_clicked)
-
-        self.btn_start = QPushButton("START UPDATE")
-        self.btn_start.setObjectName("btnStart")
-        self.btn_start.setFixedHeight(44)
-        self.btn_start.setCursor(Qt.PointingHandCursor)
-        self.btn_start.setEnabled(False)  # Disabled until devices selected
-        self.btn_start.clicked.connect(self._on_start)
-
-        bottom.addWidget(self.btn_cancel, stretch=1)  # 1/3 width
-        bottom.addWidget(self.btn_start,  stretch=2)  # 2/3 width
-        root.addLayout(bottom)
-
+        # === BOTTOM CONTAINER — populated dynamically after mode selection ===
+        # Sits in the layout permanently to reserve vertical space; children are
+        # added/removed by _build_bottom_buttons() / _clear_bottom_buttons().
+        self._bottom_container = QWidget()
+        self._bottom_layout    = QHBoxLayout(self._bottom_container)
+        self._bottom_layout.setSpacing(12)
+        self._bottom_layout.setContentsMargins(0, 0, 0, 0)
+        self._bottom_container.setFixedHeight(44)
+        root.addWidget(self._bottom_container)
+ 
         # Initialize empty table
         self.table.setRowCount(0)
         self._update_button_states()  # Set initial button states
@@ -1505,9 +2644,100 @@ class MainWindow(QMainWindow):
         # Connect geometry change signal for SELECT ALL button repositioning
         self.table.horizontalHeader().geometriesChanged.connect(self._reposition_select_all)
 
-
         # === FOR CANCEL FUNCTIONALITY ===
         self._selected_device_indices = None  # Original DataFrame indices of devices being updated
+
+    # Manage the columns width to adapt at the beginning and fill the space
+    def showEvent(self, event):
+
+        """
+        PURPOSE
+        -------
+        Called when the window is shown for the first time; adjust column widths evenly.
+        
+        
+        ARGUMENTS
+        ---------
+        None
+        
+
+        RETURN VALUE
+        ------------
+        None
+        """
+
+        super().showEvent(event)
+        # Only set initial widths once – after that the user controls them
+        if not hasattr(self, '_initial_columns_set'):
+            self._initial_columns_set = True
+            self._distribute_columns_evenly()
+    
+    def _distribute_columns_evenly(self):
+
+        """
+        PURPOSE
+        -------
+        Set Hostname and IP columns to equal halves of the table’s available width.
+        
+        
+        ARGUMENTS
+        ---------
+        None
+        
+
+        RETURN VALUE
+        ------------
+        None
+        """
+
+        total_width = self.table.viewport().width() - self.table.columnWidth(0)  # minus checkbox
+        if total_width <= 0:
+            return
+        half = total_width // 2
+        self.table.setColumnWidth(1, half)
+        self.table.setColumnWidth(2, half)
+
+    def _fit_columns_for_updater(self):
+
+        """
+        PURPOSE
+        -------
+        Adjust interactive column widths so all four data columns (Hostname,
+        IP Address, Current Ver, Target Ver) fit within the table viewport
+        without a horizontal scrollbar. Called after columns 3 & 4 are
+        unhidden in Updater mode.
+
+
+        ARGUMENTS
+        ---------
+        None
+        
+
+        RETURN VALUE
+        ------------
+        None
+
+        """
+
+        # Total usable width minus the fixed checkbox column and scrollbar margin
+        table_width = self.table.viewport().width()
+        checkbox_width = self.table.columnWidth(0)
+        available = table_width - checkbox_width - 4   # 4 px for safety
+
+        if available <= 0:
+            return
+
+        # Allocate proportions (sums to 1.0)
+        ratios = {
+            1: 0.35,   # Hostname
+            2: 0.30,   # IP Address
+            3: 0.175,  # Current Ver
+            4: 0.175,  # Target Ver
+        }
+
+        for col, ratio in ratios.items():
+            width = max(60, int(available * ratio))  # enforce minimum 60 px
+            self.table.setColumnWidth(col, width)
 
     ##############################################################
 
@@ -1620,6 +2850,195 @@ class MainWindow(QMainWindow):
                 chk.setChecked(self._all_checked)  # Apply to each checkbox
         self._update_button_states()  # Refresh START/CANCEL button states
     
+
+    ### <=== BOTTOM BUTTON MANAGEMENT ===> ###
+    def _build_bottom_buttons(self, mode):
+ 
+        """
+        PURPOSE
+        -------
+        Populate self._bottom_container with the appropriate action buttons
+        for the selected operation mode. Always clears existing buttons first.
+ 
+        Updater:        CANCEL UPDATE (1/3) + START UPDATE (2/3)
+        Command Pusher: PUSH COMMANDS (full width)
+ 
+        Also updates the mode indicator label in the title row.
+ 
+ 
+        ARGUMENTS
+        ---------
+        mode (str): 'updater' or 'command_pusher'
+ 
+ 
+        RETURN VALUE
+        ------------
+        None
+        """
+ 
+        self._clear_bottom_buttons()  # Remove any previously built widgets
+ 
+        if mode == 'updater':
+ 
+            self.btn_cancel = QPushButton("CANCEL UPDATE")
+            self.btn_cancel.setObjectName("btnCancel")
+            self.btn_cancel.setFixedHeight(44)
+            self.btn_cancel.setCursor(Qt.PointingHandCursor)
+            self.btn_cancel.setEnabled(False)  # Only active during transfer
+            self.btn_cancel.clicked.connect(self._on_cancel_clicked)
+ 
+            self.btn_start = QPushButton("START UPDATE")
+            self.btn_start.setObjectName("btnStart")
+            self.btn_start.setFixedHeight(44)
+            self.btn_start.setCursor(Qt.PointingHandCursor)
+            self.btn_start.setEnabled(False)  # Enabled once devices are selected
+            self.btn_start.clicked.connect(self._on_start)
+ 
+            self._bottom_layout.addWidget(self.btn_cancel, stretch=1)
+            self._bottom_layout.addWidget(self.btn_start,  stretch=2)
+
+            # Do not hide the 'Current Version' and 'Target Version' columns
+            self.table.setColumnHidden(3, False)
+            self.table.setColumnHidden(4, False)
+
+            # Fit columns to the viewport so all are visible without scrolling
+            QTimer.singleShot(0, self._fit_columns_for_updater)
+
+            # Gold indicator for Updater mode
+            self._mode_label.setText("UPDATER MODE")
+            self._mode_label.setStyleSheet(f"""
+                color: {GOLD};
+                font-size: 9px;
+                font-family: 'Courier New', monospace;
+                letter-spacing: 2px;
+                font-weight: bold;
+            """)
+ 
+        elif mode == 'command_pusher':
+ 
+            self.btn_push = QPushButton("PUSH COMMANDS")
+            self.btn_push.setObjectName("btnStart")  # Reuse green styling
+            self.btn_push.setFixedHeight(44)
+            self.btn_push.setCursor(Qt.PointingHandCursor)
+            self.btn_push.setEnabled(False)  # Enabled once devices are selected
+            self.btn_push.clicked.connect(self._on_push_commands)
+ 
+            self._bottom_layout.addWidget(self.btn_push)
+
+            # Hide the 'Current Version' and 'Target Version' columns
+            self.table.setColumnHidden(3, True)
+            self.table.setColumnHidden(4, True)
+
+            # Ensure the 2 columns take all the space
+            self._distribute_columns_evenly()
+
+            # Silver indicator for Command Pusher mode
+            self._mode_label.setText("COMMAND PUSHER")
+            self._mode_label.setStyleSheet(f"""
+                color: {SILVER};
+                font-size: 9px;
+                font-family: 'Courier New', monospace;
+                letter-spacing: 2px;
+                font-weight: bold;
+            """)
+ 
+        self._update_button_states()  # Sync enable/disable state immediately
+    
+    def _clear_bottom_buttons(self):
+ 
+        """
+        PURPOSE
+        -------
+        Remove all widgets from self._bottom_container and clear the
+        corresponding instance attribute references and the mode label.
+        Called before every _build_bottom_buttons() call and at the
+        start of each new scan to ensure a clean slate.
+ 
+ 
+        ARGUMENTS
+        ---------
+        None
+ 
+ 
+        RETURN VALUE
+        ------------
+        None
+        """
+ 
+        # Drain the layout — takeAt(0) is the correct Qt pattern for this
+        while self._bottom_layout.count():
+            item = self._bottom_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.disconnect()  # Sever all signal connections before deferred deletion
+                widget.deleteLater()
+ 
+        # Clear instance references so hasattr guards work correctly
+        for attr in ('btn_start', 'btn_cancel', 'btn_push'):
+            if hasattr(self, attr):
+                delattr(self, attr)
+ 
+        # Reset the mode indicator
+        self._mode_label.setText("")
+        self._mode_label.setStyleSheet(f"""
+            color: {TEXT_MUTED};
+            font-size: 9px;
+            font-family: 'Courier New', monospace;
+            letter-spacing: 2px;
+        """)
+
+        # Hide the columns specific for 'Updater' mode
+        self.table.setColumnHidden(3, True)
+        self.table.setColumnHidden(4, True)
+
+        # Since we are hiding columns 3 and 4, ensure that columns 1 and 2 take all the leftover space evenly
+        self._distribute_columns_evenly()
+
+
+    ### <=== COMMAND PUSHER ACTION (STUB) ===> ###
+    def _on_push_commands(self):
+ 
+        """
+        PURPOSE
+        -------
+        Handler for the PUSH COMMANDS button. Collects the selected device
+        indices from the table, builds a DataFrame from them, injects the
+        device credentials and DataFrame into PushCommandsDialog, and opens
+        the dialog. The worker is started from within the dialog itself once
+        the user clicks PUSH.
+ 
+ 
+        ARGUMENTS
+        ---------
+        None
+ 
+ 
+        RETURN VALUE
+        ------------
+        None
+        """
+ 
+        # Collect checked device indices from the table
+        selected_indices = []
+        for row in range(self.table.rowCount()):
+            cb = self._get_checkbox(row)
+            if cb and cb.isChecked():
+                item = self.table.item(row, 1)  # Hostname column carries the index
+                if item is not None:
+                    selected_indices.append(item.data(Qt.UserRole))
+ 
+        if not selected_indices:
+            return  # Nothing selected — should not happen if button gating is correct
+        
+        if self._valid_devices_df is None:
+            return  # No scan has completed yet — should not happen in normal flow, but it prevents potential future bugs
+ 
+        selected_df = self._valid_devices_df.loc[selected_indices]
+ 
+        dlg = PushCommandsDialog(self)
+        dlg.set_push_context(selected_df, self._device_username, self._device_password)
+        dlg.exec_()  # Blocking — worker runs inside the dialog on its own thread
+
     ##############################################################
 
     ### <=== START UPDATE BUTTON ===> ###
@@ -1641,6 +3060,11 @@ class MainWindow(QMainWindow):
 
         # Capture selected indices from table
         selected_indices = []
+
+        # Guard — btn_start only exists in Updater mode
+        if not hasattr(self, 'btn_start'):
+            return
+        
         for row in range(self.table.rowCount()):
             chk = self._get_checkbox(row)
             if chk and chk.isChecked():
@@ -1656,11 +3080,14 @@ class MainWindow(QMainWindow):
         # Store for cancellation purposes
         self._selected_device_indices = selected_indices
 
-        # Ask user for transfer mode
-        mode_dialog = TransferModeDialog(self)
-        if mode_dialog.exec_() != QDialog.Accepted:
-            return  # User cancelled (closed dialog)
-        transfer_mode = mode_dialog.selected_mode  # "sequential" or "threaded"
+        # Ask user for transfer mode — skip dialog if only 1 device selected (always sequential)
+        if len(selected_indices) == 1:
+            transfer_mode = "sequential"
+        else:
+            mode_dialog = TransferModeDialog(self)
+            if mode_dialog.exec_() != QDialog.Accepted:
+                return  # User cancelled (closed dialog)
+            transfer_mode = mode_dialog.selected_mode  # "sequential" or "threaded"
 
         # Lock UI
         self.btn_show.setEnabled(False)
@@ -1691,6 +3118,7 @@ class MainWindow(QMainWindow):
         self._update_worker.progress.connect(self._on_update_progress)
         self._update_worker.finished.connect(self._on_update_finished)
         self._update_worker.error.connect(self._on_update_error)
+        self._update_worker.warning.connect(self._on_update_warning)
         self._update_worker.finished.connect(self._update_thread.quit)
         self._update_worker.error.connect(self._update_thread.quit)
         self._update_thread.finished.connect(self._update_worker.deleteLater)
@@ -1751,6 +3179,31 @@ class MainWindow(QMainWindow):
         self._restore_ui_after_update()  # Re-enable all buttons and inputs
         ErrorDialog("Update Failed", error_msg, self).exec_()  # Show error dialog
 
+    def _on_update_warning(self, warning_msg):
+ 
+        """
+        PURPOSE
+        -------
+        Display a non-fatal warning to the user when the Excel tracker could not
+        be updated during the update process. The update workflow continues
+        uninterrupted — this is informational only.
+ 
+ 
+        ARGUMENTS
+        ---------
+        warning_msg (str):
+        Warning message describing which tracker write failed and why.
+ 
+ 
+        RETURN VALUE
+        ------------
+        None
+        """
+ 
+        dlg = WarningDialog("Excel Tracker Warning", warning_msg, self)
+        dlg.setAttribute(Qt.WA_DeleteOnClose)  # Qt cleans up the dialog object when user closes it
+        dlg.open() # Non-blocking window-modal — no nested event loop
+
     def _on_update_progress(self, message):
 
         """
@@ -1775,10 +3228,11 @@ class MainWindow(QMainWindow):
         self._update_loading_message(message)
 
         # Enable Cancel button only during the SCP transfer phase
-        if "Transferring IOS files" in message:
-            self.btn_cancel.setEnabled(True)   # user can cancel transfers
-        else:
-            self.btn_cancel.setEnabled(False)  # no cancel during install, reload, etc.
+        if hasattr(self, 'btn_cancel'):
+            if "Transferring IOS files" in message:
+                self.btn_cancel.setEnabled(True)   # user can cancel transfers
+            else:
+                self.btn_cancel.setEnabled(False)  # no cancel during install, reload, etc.
 
     def _restore_ui_after_update(self):
 
@@ -1807,7 +3261,8 @@ class MainWindow(QMainWindow):
         self.btn_show.setEnabled(True)  # Re-enable SHOW button
         self.sheet_input.setEnabled(True)  # Re-enable Excel sheet input
         self.btn_select_all.setEnabled(True)  # Re-enable SELECT ALL button
-        self.btn_cancel.setEnabled(False)  # Disable CANCEL UPDATE button
+        if hasattr(self, 'btn_cancel'):
+            self.btn_cancel.setEnabled(False)  # Disable CANCEL UPDATE button
         self._update_show_button_state()  # Refresh SHOW button based on input text
         self._update_button_states()  # Re-evaluate START button based on selection
 
@@ -1840,6 +3295,10 @@ class MainWindow(QMainWindow):
         ------------
         None
         """
+
+        # Guard — btn_cancel only exists in Updater mode
+        if not hasattr(self, 'btn_cancel'):
+            return
 
         # Disable immediately — gives instant visual feedback before the 
         # blocking CLI call begins (which can take several seconds)
@@ -1907,33 +3366,27 @@ class MainWindow(QMainWindow):
         """
         PURPOSE
         -------
-        Evaluates current UI conditions and enables/disables action buttons accordingly.
+        Evaluates current UI conditions and enables/disables the action buttons
+        (START UPDATE and PUSH COMMANDS) accordingly.
         
-        The START UPDATE button requires three conditions to be enabled:
+        Both action buttons require the same three conditions to be enabled:
             1. The table contains at least one device row (has_devices)
             2. At least one checkbox is currently checked (has_selection)
-            3. No update is currently in progress (not _update_running)
+            3. No update or push operation is currently in progress (not _update_running)
             
-        If any condition fails, the START button remains disabled (dark green).
+        If any condition fails, both buttons remain disabled (dark green).
         
         The CANCEL UPDATE button is managed separately — it is only enabled
-        during an active update process (_update_running is True). This method
-        ensures CANCEL is forcefully disabled when no update is running,
-        returning it to its dark-red disabled state.
+        during an active transfer stage (file transfer) and is forcefully disabled
+        here when no operation is running, returning it to its dark-red disabled state.
         
         This method is called after any action that modifies device selection,
         table content, or the update running state, including:
             - Toggling individual checkboxes
             - Clicking SELECT ALL
-            - Loading demo data
-            - Completing or cancelling an update
-            
-        Note:
-        During an active update, _update_cancel_button_state() handles
-        the more nuanced cancel button behavior (only enabled when at
-        least one originally-selected device is checked). This method
-        provides the baseline state management outside of updates.
-        
+            - Loading device data
+            - Completing or cancelling an operation
+
 
         ARGUMENTS
         ---------
@@ -1956,14 +3409,19 @@ class MainWindow(QMainWindow):
                     has_selection = True
                     break  # Found at least one — stop searching
         
-        # Both buttons require devices AND at least one selected
+        # Action buttons require devices AND at least one selected
         enabled = has_devices and has_selection and not self._update_running
-        
-        self.btn_start.setEnabled(enabled)  # Enable/disable START button
-        
+
+        if hasattr(self, 'btn_start'):
+            self.btn_start.setEnabled(enabled) # UPDATER mode start
+ 
+        if hasattr(self, 'btn_push'):
+            self.btn_push.setEnabled(enabled) # COMMAND PUSHER mode start
+
         # Cancel button only enabled when update is running
         if not self._update_running:
-            self.btn_cancel.setEnabled(False)  # Force disable when no update
+            if hasattr(self, 'btn_cancel'):
+                self.btn_cancel.setEnabled(False)  # Force disable when no operation
 
     ### <=== SHOW BUTTON STATE MANAGEMENT ===> ###
     def _update_show_button_state(self):
@@ -2010,21 +3468,27 @@ class MainWindow(QMainWindow):
         """
         PURPOSE
         -------
-        Prompt for credentials and load eligible devices from the Excel sheet.
-        
+        Prompt for credentials and operation mode, then load eligible devices
+        from the Excel sheet.
+
         Retrieves the sheet name from the input field, then displays a modal
         credentials dialog for the user to enter device authentication
-        credentials (username and password). The password is masked and
-        includes a visibility toggle.
-        
+        credentials (username and password) and select an operation mode
+        (UPDATER or COMMAND PUSHER). The password is masked and includes a
+        visibility toggle.
+
+        After the dialog is accepted, the credentials and the selected mode are
+        stored as instance variables. The bottom action buttons are cleared to
+        provide a fresh start before the scan begins.
+
         Before loading devices, verifies that the Excel file is not currently
         open in another application. If it is locked, displays an error dialog
         and aborts the operation.
-        
-        If the user submits valid credentials and the file is accessible,
-        they are stored as instance variables for later use during the update
-        process. The method then proceeds to load and display the device
-        inventory from the specified Excel sheet using a background thread.
+
+        The method then proceeds to load and display the device inventory from
+        the specified Excel sheet using a background thread. The selected
+        operation mode is passed to the worker so that the subsequent workflow
+        can adapt accordingly.
         
 
         ARGUMENTS
@@ -2042,11 +3506,15 @@ class MainWindow(QMainWindow):
         #     return
 
         # Show Credentials Dialog
-        dialog = CredentialsDialog(self)
+        dialog = Credentials_and_mode_Dialog(self)
         if dialog.exec_() != QDialog.Accepted:  # User cancelled
             return
 
         self._device_username, self._device_password = dialog.get_credentials()  # Store credentials
+        self._mode = dialog.get_mode()  # Store the selected operation mode
+
+        # Reset the bottom area before the scan so re-runs start clean
+        self._clear_bottom_buttons()
 
         # Lock UI while working
         self.btn_show.setEnabled(False)
@@ -2067,7 +3535,8 @@ class MainWindow(QMainWindow):
             excel_file,
             sheet_name,
             self._device_username,
-            self._device_password
+            self._device_password,
+            self._mode
         )
         self._show_worker.moveToThread(self._show_thread)  # Move worker to thread
 
@@ -2122,7 +3591,9 @@ class MainWindow(QMainWindow):
         self.sheet_input.setEnabled(True)
         self.btn_select_all.setEnabled(True)
         self._update_show_button_state()  # Refresh based on input content
-        self._update_button_states()  # Refresh START/CANCEL button states
+        
+        # Build the correct bottom buttons for the active mode
+        self._build_bottom_buttons(self._mode)
 
     def _on_show_devices_error(self, message):
 
@@ -2169,8 +3640,8 @@ class MainWindow(QMainWindow):
         device details in subsequent columns.
         
         The original DataFrame index is stored as UserRole data on the Hostname
-        cell so that START UPDATE can correctly map back to the source
-        valid_devices_df when initiating firmware updates.
+        cell so that action button can correctly map back to the source
+        valid_devices_df when initiating firmware updates or pushing commands.
         
 
         ARGUMENTS
@@ -2359,12 +3830,13 @@ class ShowDevicesWorker(QObject):
     error       = pyqtSignal(str) # emits an error message string on failure
     progress    = pyqtSignal(str) # emits progress messages
 
-    def __init__(self, excel_file, sheet_name, username, password):
+    def __init__(self, excel_file, sheet_name, username, password, mode):
         super().__init__()
         self.excel_file  = excel_file
         self.sheet_name  = sheet_name
         self.username    = username
         self.password    = password
+        self.mode        = mode  # 'updater' or 'command_pusher'
 
     def run(self):
         try:
@@ -2417,6 +3889,13 @@ class ShowDevicesWorker(QObject):
                 return
 
 
+            ### <=== ZERO THE EXCEL TRACKER ===> ###
+            self.progress.emit("Zeroing the EXCEL tracker...")
+            QThread.msleep(100)
+            if not self._update_tracker(valid_devices_df):
+                return
+
+
             ### <=== CHECK DEVICE STATUS FOR ONLINE AND AUTHENTICATION ===> ###
             self.progress.emit("Checking ONLINE status and authentication...")
             QThread.msleep(100)
@@ -2440,6 +3919,21 @@ class ShowDevicesWorker(QObject):
                 return
 
 
+            ### <=== COMMAND PUSHER: EARLY EXIT ===> ###
+            # In Command Pusher mode the pipeline stops here — no RESTCONF check,
+            # no version retrieval, no flash check. Devices shown are ONLINE + AUTH_OK only.
+            if self.mode == 'command_pusher':
+                online_authok_df = valid_devices_df[
+                    (valid_devices_df['Status']      == 'ONLINE') &
+                    (valid_devices_df['Auth Status'] == 'AUTH_OK')
+                ].copy()
+                #------------------------------------------------------------------------------------------
+                logger.info(f"Command Pusher mode: {len(online_authok_df)} ONLINE/AUTH_OK device(s) ready")
+                #------------------------------------------------------------------------------------------
+                self.finished.emit(online_authok_df, valid_devices_df)
+                return
+
+
             ### <=== CHECK DEVICE RESTCONF STATUS ===> ###
             self.progress.emit("Checking RESTCONF Status on devices...")
             QThread.msleep(100)
@@ -2448,16 +3942,8 @@ class ShowDevicesWorker(QObject):
                 valid_devices_df, self.username, self.password, 30, 7
             )
             
-            if result is not None:
-                if result == "NO_ELIGIBLE_DEVICES_ERROR":
-                    self.error.emit(
-                        f"❌ NO ELIGIBLE DEVICES\n\n"
-                        f"No devices are both ONLINE and AUTHENTICATED.\n\n"
-                        f"RESTCONF check skipped — no devices to poll."
-                    )
-                    return
-                    
-                elif result == "RESTCONF_TIMEOUT_ERROR":
+            if result is not None:                   
+                if result == "RESTCONF_TIMEOUT_ERROR":
                     self.error.emit(
                         f"❌ RESTCONF FAILED\n\n"
                         f"All eligible devices failed to establish RESTCONF connectivity.\n\n"
@@ -2481,6 +3967,37 @@ class ShowDevicesWorker(QObject):
                     self.error.emit(f"❌ ERROR\n\nRESTCONF check failed: {result}")
                     return
 
+
+            ### <=== CHECK SCP SERVER STATUS ===> ###
+            self.progress.emit("Checking SCP server status on devices...")
+            QThread.msleep(100)
+ 
+            result = excel_and_data_ops.populate_scp_status_column(
+                valid_devices_df, self.username, self.password
+            )
+ 
+            if result is not None:
+                if result == "ALL_DEVICES_FAILED_ERROR":
+                    self.error.emit(
+                        f"❌ SCP DISABLED ON ALL DEVICES\n\n"
+                        f"SCP server is not enabled on any device.\n\n"
+                        f"Please enable SCP on the devices before running an update:\n"
+                        f"  ip scp server enable"
+                    )
+                    return
+ 
+                elif result == "UNEXPECTED_ERROR":
+                    self.error.emit(
+                        f"❌ UNEXPECTED ERROR\n\n"
+                        f"An error occurred while checking SCP status.\n\n"
+                        f"Please check the logs for details."
+                    )
+                    return
+ 
+                else:
+                    self.error.emit(f"❌ ERROR\n\nSCP status check failed: {result}")
+                    return
+                
 
             ### <=== RETRIEVE CURRENT IOS VERSION ===> ###
             self.progress.emit("Retrieving the current IOS version...")
@@ -2699,64 +4216,181 @@ class ShowDevicesWorker(QObject):
             ### <=== UPDATE THE EXCEL TRACKER ===> ###
             self.progress.emit("Updating the EXCEL tracker...")
             QThread.msleep(100)
-            result = excel_and_data_ops.update_excel_tracker(
-                self.excel_file, self.sheet_name, valid_devices_df
-            )
-            
-            if result != "SUCCESS":
-                if result == "MISSING_COLUMN_EXCEL_ERROR":
-                    self.error.emit(
-                        f"❌ MISSING COLUMNS IN EXCEL\n\n"
-                        f"The Excel sheet '{self.sheet_name}' is missing one or more required tracking columns.\n\n"
-                        f"Please ensure the sheet contains all expected columns:\n"
-                        f"• Hostname\n"
-                        f"• Current IOS Version\n"
-                        f"• Status\n"
-                        f"• Auth Status\n"
-                        f"• Enough Flash Space\n"
-                        f"• Needs Update\n"
-                        f"• Update IOS File Present\n"
-                        f"• Transfer Result\n"
-                        f"• Install Status\n"
-                        f"• Update Result\n"
-                        f"• Cleaned Inactive\n\n"
-                        f"Use the provided template or add the missing columns."
-                    )
-                    return
-                    
-                elif result == "PERMISSION_DENIED_ERROR":
-                    self.error.emit(
-                        f"❌ PERMISSION DENIED\n\n"
-                        f"Cannot save changes to the Excel file.\n\n"
-                        f"Please ensure:\n"
-                        f"• The Excel file is CLOSED (not open in Excel)\n"
-                        f"• You have write permissions to the file\n"
-                        f"• The file is not marked as read-only\n\n"
-                        f"Close Excel and try again."
-                    )
-                    return
-                    
-                elif result == "UNEXPECTED_ERROR":
-                    self.error.emit(
-                        f"❌ UNEXPECTED ERROR\n\n"
-                        f"An error occurred while updating the Excel tracker.\n\n"
-                        f"Please check the logs for details."
-                    )
-                    return
-                    
-                else:
-                    self.error.emit(
-                        f"❌ ERROR\n\n"
-                        f"Excel tracker update failed: {result}"
-                    )
-                    return
+            if not self._update_tracker(valid_devices_df):
+                return
 
 
             ### <=== GET ELIGIBLE DEVICES FOR UPDATE ===> ###
+            self.progress.emit("Getting eligible devices...")
             eligible_devices_df = excel_and_data_ops.get_eligible_devices_df(valid_devices_df)
+            QThread.msleep(100)
+
+            if isinstance(eligible_devices_df, str) and eligible_devices_df == "ELIGIBLE_DEVICES_EMPTY":
+                self.error.emit(
+                    f"❌ NO ELIGIBLE DEVICES\n\n"
+                    f"No devices meet all the update requirements.\n\n"
+                    f"Possible reasons:\n"
+                    f"• Device is OFFLINE or AUTH_BAD\n"
+                    f"• RESTCONF is NOT_OPERATIVE\n"
+                    f"• SCP is not enabled\n"
+                    f"• Current version could not be retrieved\n"
+                    f"• Not enough flash space\n"
+                    f"• No update needed\n"
+                    f"• IOS image file not found\n\n"
+                    f"Please check the Excel tracker for per-device details."
+                )
+                return
+            
             self.finished.emit(eligible_devices_df, valid_devices_df)
 
 
+        except Exception as e:
+            self.error.emit(str(e))
+
+    def _update_tracker(self, valid_devices_df):
+ 
+        """
+        PURPOSE
+        -------
+        Calls update_excel_tracker and handles every possible error code by
+        emitting the appropriate error signal. The caller checks the return
+        value and does 'return' if False, halting the scan.
+ 
+ 
+        ARGUMENTS
+        ---------
+        valid_devices_df (pd.DataFrame): Current state of the devices DataFrame to be written to the Excel file.
+ 
+ 
+        RETURN VALUE
+        ------------
+        True  — Excel file was updated successfully.
+        False — A failure occurred; error signal already emitted.
+        """
+ 
+        result = excel_and_data_ops.update_excel_tracker(
+            self.excel_file, self.sheet_name, valid_devices_df
+        )
+ 
+        if result == "SUCCESS":
+            return True
+ 
+        if result == "MISSING_COLUMN_EXCEL_ERROR":
+            self.error.emit(
+                f"❌ MISSING COLUMNS IN EXCEL\n\n"
+                f"The Excel sheet '{self.sheet_name}' is missing one or more required tracking columns.\n\n"
+                f"Please ensure the sheet contains all expected columns:\n"
+                f"• Hostname\n"
+                f"• Current IOS Version\n"
+                f"• Status\n"
+                f"• Auth Status\n"
+                f"• Enough Flash Space\n"
+                f"• Needs Update\n"
+                f"• Update IOS File Present\n"
+                f"• Transfer Result\n"
+                f"• Install Status\n"
+                f"• Update Result\n"
+                f"• Cleaned Inactive\n\n"
+                f"Use the provided template or add the missing columns."
+            )
+ 
+        elif result == "PERMISSION_DENIED_ERROR":
+            self.error.emit(
+                f"❌ PERMISSION DENIED\n\n"
+                f"Cannot save changes to the Excel file.\n\n"
+                f"Please ensure:\n"
+                f"• The Excel file is CLOSED (not open in Excel)\n"
+                f"• You have write permissions to the file\n"
+                f"• The file is not marked as read-only\n\n"
+                f"Close Excel and try again."
+            )
+ 
+        elif result == "UNEXPECTED_ERROR":
+            self.error.emit(
+                f"❌ UNEXPECTED ERROR\n\n"
+                f"An error occurred while updating the Excel tracker.\n\n"
+                f"Please check the logs for details."
+            )
+ 
+        else:
+            self.error.emit(
+                f"❌ ERROR\n\n"
+                f"Excel tracker update failed: {result}"
+            )
+ 
+        return False
+    
+
+# WORKER: PUSH COMMANDS
+# ---------------------
+class PushCommandsWorker(QObject):
+ 
+    """
+    Background worker that pushes a list of exec-mode CLI commands to all
+    selected devices concurrently. Runs on a separate QThread to keep the
+    GUI responsive during execution.
+    """
+ 
+    finished = pyqtSignal(list) # Emitted with list[(index, result)] when all devices processed
+    error    = pyqtSignal(str) # Emitted on an unhandled exception
+ 
+    def __init__(self, selected_df, username, password, commands):
+ 
+        """
+        PURPOSE
+        -------
+        Initialize the worker with the device DataFrame, credentials, and
+        the list of commands to push.
+ 
+ 
+        ARGUMENTS
+        ---------
+        selected_df (pd.DataFrame): Devices selected by the user in the table.
+        username    (str):          Device SSH username.
+        password    (str):          Device SSH password.
+        commands    (list[str]):    Ordered list of exec-mode CLI commands.
+ 
+ 
+        RETURN VALUE
+        ------------
+        None
+        """
+ 
+        super().__init__()
+        self.selected_df = selected_df
+        self.username    = username
+        self.password    = password
+        self.commands    = commands
+ 
+    def run(self):
+ 
+        """
+        PURPOSE
+        -------
+        Execute the command push across all selected devices and emit finished
+        with the results list when complete. Any unhandled exception emits the
+        error signal instead.
+
+
+        ARGUMENTS
+        ---------
+        None
+
+
+        RETURN VALUE
+        ------------
+        None
+        """
+ 
+        try:
+            results = device_cli_ops.push_commands_all(
+                self.selected_df,
+                self.username,
+                self.password,
+                self.commands
+            )
+            self.finished.emit(results)
+ 
         except Exception as e:
             self.error.emit(str(e))
 
@@ -2782,6 +4416,7 @@ class UpdateWorker(QObject):
     finished = pyqtSignal(str)   # Emits final summary message on success
     error    = pyqtSignal(str)   # Emits error message on fatal failure
     progress = pyqtSignal(str)   # Emits stage descriptions
+    warning  = pyqtSignal(str)   # Emits non-fatal warning (e.g. Excel tracker write failure)
 
     def __init__(self, excel_file, sheet_name, valid_devices_df, selected_indices, username, password, transfer_mode):
 
@@ -2876,6 +4511,7 @@ class UpdateWorker(QObject):
                 self.password,
                 self.transfer_mode # Pass the user's choice from the dialog
             )
+
             self._update_tracker() # Save progress to Excel
 
             # Check if the user pressed Cancel during the transfer
@@ -3029,31 +4665,66 @@ class UpdateWorker(QObject):
             self.error.emit(str(e))
 
     def _update_tracker(self):
-
+ 
         """
         PURPOSE
         -------
         Save the current state of valid_devices_df to the Excel file.
-        
+ 
         Called after each major stage of the update process to persist
-        results in case of a later failure or cancellation.
-        
-
+        results in case of a later failure or cancellation. On failure,
+        emits a warning signal so the user is informed without interrupting
+        the update workflow.
+ 
+ 
         ARGUMENTS
         ---------
         None
-        
-
+ 
+ 
         RETURN VALUE
         ------------
         None
         """
-
-        excel_and_data_ops.update_excel_tracker(
+ 
+        result = excel_and_data_ops.update_excel_tracker(
             self.excel_file,
             self.sheet_name,
             self.valid_devices_df
         )
+ 
+        if result == "SUCCESS":
+            return
+ 
+        if result == "MISSING_COLUMN_EXCEL_ERROR":
+            self.warning.emit(
+                f"⚠️ EXCEL TRACKER NOT UPDATED\n\n"
+                f"The Excel sheet '{self.sheet_name}' is missing one or more required tracking columns.\n\n"
+                f"The update process will continue, but results will not be saved to the Excel file.\n\n"
+                f"Please add the missing columns to the sheet after the operation completes."
+            )
+ 
+        elif result == "PERMISSION_DENIED_ERROR":
+            self.warning.emit(
+                f"⚠️ EXCEL TRACKER NOT UPDATED\n\n"
+                f"Cannot write to the Excel file — permission denied.\n\n"
+                f"The update process will continue, but results will not be saved to the Excel file.\n\n"
+                f"Please ensure the file is closed and not read-only, then update it manually."
+            )
+ 
+        elif result == "UNEXPECTED_ERROR":
+            self.warning.emit(
+                f"⚠️ EXCEL TRACKER NOT UPDATED\n\n"
+                f"An unexpected error occurred while saving to the Excel file.\n\n"
+                f"The update process will continue. Please check the logs for details."
+            )
+ 
+        else:
+            self.warning.emit(
+                f"⚠️ EXCEL TRACKER NOT UPDATED\n\n"
+                f"Excel tracker write failed: {result}\n\n"
+                f"The update process will continue."
+            )
 
     def _generate_summary(self):
 

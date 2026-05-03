@@ -1,0 +1,17 @@
+Hey there Motivator! From the creators of the CrayonEaters Series...
+
+Tired of manually updating your routers and switches before every field op? Feeling dumb when you are typing the same commands on every device?
+Don't worry, the Tactical-CiscoIOS-Controller is here to save you some time and effort!
+
+No more bending over to reach the console port of your LEM's switch. No more finding a console cable just to not have the drivers installed on your CM. Enough 
+Powershell scripts that you don't even understand. Someone get a damn GUI!
+
+And we got it, just fresh of the compiler for you. Lightweight, portable and easy to operate, this controller can run updates on INSTALL mode for many Cisco IOS-XE devices
+at once with just 2 clicks! Keep track of your devices on a nice EXCEL tracker organized by sheets for each scenario, and choose whether to push and retrieve data from devices, 
+or run updates on them. Run it on any MCEN laptop, on any CM, on your personal gaming computer, ... anywhere, at any time, in any enclave.
+
+In today's battlefield, DNAC is not tactical and ANSIBLE is impractical. Don't even think about Terraform. When you are in the middle of the jungle operating a LAN it is humid, it is hot, and suddenly DCO
+complains about the version of the switches being outdated, causing your leadership to crash out. The last you want to think about is HashiCorp language while your Gunny is yelling at you to get the updates done faster. Dominate this tactical tool and become part of the next generation of network administrators. Stop working hard, start working smart.
+
+
+

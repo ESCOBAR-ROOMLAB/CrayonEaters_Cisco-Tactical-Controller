@@ -17,7 +17,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from netmiko import ConnectHandler
 
 # Catch auth and timeout failures separately from connectivity failures
-from netmiko.exceptions import NetmikoAuthenticationException, NetmikoTimeoutException
+from netmiko.exceptions import (
+    NetmikoAuthenticationException,
+    NetmikoTimeoutException,
+    ReadTimeout,
+    ConfigInvalidException,
+    
+)
 
 # Catch timeout failures via Paramiko methods
 from paramiko.ssh_exception import SSHException
@@ -62,8 +68,8 @@ logger.addHandler(handler)
 cancel_event = threading.Event()
 
 
-# ENABLE SCP AND RESTCONF ON ALL ONLINE DEVICES
-# ---------------------------------------------
+# CHECK CONNECTIVITY VIA SSH
+# --------------------------
 def first_connectivity_check(row, username, password):
 
     """
@@ -105,7 +111,7 @@ def first_connectivity_check(row, username, password):
             '!'
         ]
 
-        # Push the conficommandto the devices
+        # Push the config commands to the devices
         connection.send_config_set(commands)
         connection.disconnect()
 
@@ -181,8 +187,8 @@ def first_connectivity_check_all(valid_devices_df, username, password):
     return results
 
 
-# ENABLE SCP AND RESTCONF ON ALL ONLINE DEVICES
-# ---------------------------------------------
+# NOT USED: ENABLE SCP AND RESTCONF ON ALL ONLINE DEVICES
+# -------------------------------------------------------
 def enable_scp_and_restconf(row, username, password):
 
     """
@@ -304,8 +310,8 @@ def enable_scp_and_restconf_all(valid_devices_df, username, password):
     return results
 
 
-# DISABLE SCP AND HTTP ON ONLINE, NON-SELECTED DEVICES
-# ----------------------------------------------------
+# NOT USED: DISABLE SCP AND HTTP ON ONLINE, NON-SELECTED DEVICES
+# --------------------------------------------------------------
 def disable_scp_and_restconf(row, username, password):
 
     """
@@ -430,6 +436,124 @@ def disable_scp_and_restconf_all(online_authok_devices_df, username, password):
                 result = 'UNEXPECTED_ERROR'
 
             results[index] = result
+
+    return results
+
+
+# CHECK SCP SERVER STATUS ON ONLINE/AUTH_OK DEVICES
+# -------------------------------------------------
+def check_scp_status(row, username, password):
+
+    """
+    PURPOSE
+    -------
+    Connects to a device via Netmiko and runs 'show run | section ip scp'
+    to determine whether the SCP server is enabled on the device.
+
+    The command returns an empty string when SCP is disabled and the
+    line 'ip scp server enable' when it is enabled. No configuration
+    change is made — this is a read-only check.
+
+
+    ARGUMENTS
+    ---------
+    row      (pd.Series): A single DataFrame row containing 'OOBM IP Address' and 'Hostname'.
+    username (str):       Device SSH username.
+    password (str):       Device SSH password.
+
+
+    RETURN VALUE
+    ------------
+    Tuple of (index, scp_status) where scp_status is one of:
+        'YES'  — 'ip scp server enable' found in running config.
+        'NO' — Command returned empty output; SCP is not configured.
+        'AUTH_BAD' — Device is reachable but rejected the credentials.
+        'UNKNOWN'  — SSH connection could not be established.
+    """
+
+    ip       = row['OOBM IP Address']
+    hostname = row['Hostname']
+    index    = row.name
+
+    try:
+        connection = ConnectHandler(
+            device_type='cisco_ios',
+            host=ip,
+            username=username,
+            password=password
+        )
+
+        output = connection.send_command('show run | section ip scp')
+        connection.disconnect()
+
+        # Determine if SCP is enabled or not based on the output
+        scp_enabled = 'ip scp server enable' in output.lower()
+        status = 'YES' if scp_enabled else 'NO'
+
+        #---------------------------------------------------------
+        logger.info(f"SCP check on '{hostname}' ({ip}): {status}")
+        #---------------------------------------------------------
+
+        return index, status
+
+    except NetmikoAuthenticationException:
+        #-------------------------------------------------------------------------------
+        logger.warning(f"Authentication failed on '{hostname}' ({ip}) during SCP check")
+        #-------------------------------------------------------------------------------
+        return index, 'AUTH_BAD'
+
+    except Exception as e:
+        #------------------------------------------------------------------------
+        logger.warning(f"Could not reach '{hostname}' ({ip}) for SCP check: {e}")
+        #------------------------------------------------------------------------
+        return index, 'UNKNOWN'
+
+# Thread pool -- Called by '' from 'excel_and_data_ops'   
+def check_scp_status_all(online_authok_df, username, password):
+
+    """
+    PURPOSE
+    -------
+    Concurrently checks SCP server status on all devices in the supplied
+    DataFrame using a thread pool. Each device is handled by check_scp_status.
+
+
+    ARGUMENTS
+    ---------
+    online_authok_df (pd.DataFrame): DataFrame pre-filtered to ONLINE/AUTH_OK devices.
+                                     Must contain 'OOBM IP Address' and 'Hostname'.
+    username         (str):          Device SSH username.
+    password         (str):          Device SSH password.
+
+
+    RETURN VALUE
+    ------------
+    List of (index, scp_status) tuples — one per device.
+    index matches the original DataFrame index for safe .at[] assignment.
+    scp_status is one of: 'YES', 'NO', 'AUTH_BAD', 'UNKNOWN'.
+    """
+
+    results = []
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+
+        futures = {
+            executor.submit(check_scp_status, row, username, password): row['Hostname']
+            for _, row in online_authok_df.iterrows()
+        }
+
+        for future in as_completed(futures):
+            hostname = futures[future]
+            try:
+                index, scp_status = future.result()
+                results.append((index, scp_status))
+                #----------------------------------------------------
+                logger.info(f"'{hostname}' SCP status: {scp_status}")
+                #----------------------------------------------------
+            except Exception as e:
+                #------------------------------------------------------------------
+                logger.error(f"Unexpected error checking SCP on '{hostname}': {e}")
+                #------------------------------------------------------------------
 
     return results
 
@@ -1329,8 +1453,6 @@ def cancel_single_device(row, username, password):
         logger.warning(f"Active VTY sessions cleared on {ip}")
         #-----------------------------------------------------
 
-        vty_phase_ok = True   # signal that the first phase succeeded
-
     except Exception as e:
         #-----------------------------------------------------------
         logger.error(f"'{hostname}' ({ip}): VTY clear failed – {e}")
@@ -1338,31 +1460,30 @@ def cancel_single_device(row, username, password):
         return index, 'VTY_CLEAR_FAILED'
 
     # Only attempt file deletion if VTY clearing succeeded
-    if vty_phase_ok:
-        try:
-            connection = ConnectHandler(
-                device_type='cisco_ios',
-                host=ip,
-                username=username,
-                password=password
-            )
+    try:
+        connection = ConnectHandler(
+            device_type='cisco_ios',
+            host=ip,
+            username=username,
+            password=password
+        )
 
-            # Delete the partially copied IOS image file
-            connection.send_command(f'delete /force bootflash:{remote_filename}')
-            #-------------------------------------------------------------
-            logger.warning(f"Partial file deleted from bootflash on {ip}")
-            #-------------------------------------------------------------
+        # Delete the partially copied IOS image file
+        connection.send_command(f'delete /force bootflash:{remote_filename}')
+        #-------------------------------------------------------------
+        logger.warning(f"Partial file deleted from bootflash on {ip}")
+        #-------------------------------------------------------------
 
-            # Close the connection
-            connection.disconnect()
-            
-            return index, 'SUCCESS'
+        # Close the connection
+        connection.disconnect()
+        
+        return index, 'SUCCESS'
 
-        except Exception as e:
-            #---------------------------------------------------------------
-            logger.error(f"'{hostname}' ({ip}): file deletion failed – {e}")
-            #---------------------------------------------------------------
-            return index, 'FILE_DELETE_FAILED'
+    except Exception as e:
+        #---------------------------------------------------------------
+        logger.error(f"'{hostname}' ({ip}): file deletion failed – {e}")
+        #---------------------------------------------------------------
+        return index, 'FILE_DELETE_FAILED'
 
     return index, 'VTY_CLEAR_FAILED' # fallback
 
@@ -1423,5 +1544,177 @@ def cancel_active_transfers_all(selected_devices_df, username, password):
                 index  = idx
                 result = 'UNEXPECTED_ERROR'
             results[index] = result
+
+    return results
+
+
+# PUSH EXEC COMMANDS TO A SINGLE DEVICE
+# --------------------------------------
+def push_commands(row, username, password, commands):
+
+    """
+    PURPOSE
+    -------
+    Opens a Netmiko SSH connection to a single device and sends each command
+    in the list sequentially using send_command. Commands are treated as
+    exec-mode only — no config mode is entered. If the user needs config-mode
+    commands, they must include 'configure terminal' as the first line.
+
+
+    ARGUMENTS
+    ---------
+    row      (pd.Series): A single DataFrame row containing 'OOBM IP Address' and 'Hostname'.
+    username (str):       Device SSH username.
+    password (str):       Device SSH password.
+    commands (list[str]): Ordered list of exec-mode CLI commands to send.
+
+
+    RETURN VALUE
+    ------------
+    Tuple of (index, result) where result is one of:
+        'SUCCESS'     — All commands sent without error.
+        'BAD_COMMAND' — A command's response contained an IOS error pattern (% Invalid input, etc.).
+        'AUTH_BAD'    — Device rejected the credentials.
+        'OFFLINE'     — SSH connection could not be established.
+        'TIMEOUT'     — Read timeout — device was slow or unresponsive.
+        'CONFIG_ERROR'— Syntax or unsupported command detected by Netmiko.
+        'SSH_ERROR'   — SSH cipher/key exchange/session failure.
+        'UNEXPECTED_ERROR' — Any other unhandled exception.
+    """
+
+    ip       = row['OOBM IP Address']
+    hostname = row['Hostname']
+    index    = row.name
+
+    try:
+        connection = ConnectHandler(
+            device_type = 'cisco_ios',
+            host        = ip,
+            username    = username,
+            password    = password,
+        )
+
+        # Error patterns returned by IOS when a command is invalid
+        error_patterns = [
+            "% Invalid input",
+            "% Incomplete command",
+            "% Ambiguous command",
+            "% Bad IP address or host name%",
+            "Unknown command or computer name, or unable to find computer address"
+        ]
+
+        for cmd in commands:
+            
+            #------------------------------------------------------------------
+            logger.info(f"Pushing command(s) to '{hostname}' ({ip}) — '{cmd}'")
+            #------------------------------------------------------------------
+            output = connection.send_command(cmd, expect_string=r'(?:\([\w\-]+\))?[>#]\s*$', read_timeout=30)
+
+            # # — exec prompt
+            # > — unprivileged prompt
+            # (config)# — global config
+            # (config-if)#, (config-router)#, etc. — sub-mode prompts
+
+            if any(pattern in output for pattern in error_patterns):
+                connection.disconnect()
+                #---------------------------------------------------------------------------------------
+                logger.error(f"Bad command on '{hostname}' ({ip}) — '{cmd}' returned: {output.strip()}")
+                #---------------------------------------------------------------------------------------
+                return index, 'BAD_COMMAND'
+
+        connection.disconnect()
+
+        #------------------------------------------------------------------
+        logger.info(f"Commands pushed successfully to '{hostname}' ({ip})")
+        #------------------------------------------------------------------
+
+        return index, 'SUCCESS'
+    
+    except Exception as e:
+
+        if isinstance(e, NetmikoAuthenticationException):
+            #--------------------------------------------------------------------------------
+            logger.error(f"Authentication failed on '{hostname}' ({ip}) during command push")
+            #--------------------------------------------------------------------------------
+            return index, 'AUTH_BAD'
+
+        elif isinstance(e, NetmikoTimeoutException):
+            #------------------------------------------------------------------------------
+            logger.error(f"Could not reach '{hostname}' ({ip}) for command push (timeout)")
+            #------------------------------------------------------------------------------
+            return index, 'OFFLINE'
+
+        elif isinstance(e, ReadTimeout):
+            #----------------------------------------------------------------------------------------
+            logger.error(f"Read timeout on '{hostname}' ({ip}) – device may be slow or unresponsive")
+            #----------------------------------------------------------------------------------------
+            return index, 'TIMEOUT'
+
+        elif isinstance(e, ConfigInvalidException):
+            #------------------------------------------------------------------------------------------
+            logger.error(f"Configuration error on '{hostname}' ({ip}) — syntax or unsupported command")
+            #------------------------------------------------------------------------------------------
+            return index, 'CONFIG_ERROR'
+
+        elif isinstance(e, SSHException):
+            #------------------------------------------------------------------------------------
+            logger.error(f"SSH error on '{hostname}' ({ip}) — cipher/key exchange/session issue")
+            #------------------------------------------------------------------------------------
+            return index, 'SSH_ERROR'
+
+        else:
+            # Catch-all for any other exception
+            #-----------------------------------------------------------------------------------------------------
+            logger.error(f"Unexpected error on '{hostname}' ({ip}) during command push — {type(e).__name__}: {e}")
+            #-----------------------------------------------------------------------------------------------------
+            return index, 'UNEXPECTED_ERROR'
+        
+# Thread pool -- Called by '' from 'program_gui'
+def push_commands_all(selected_df, username, password, commands):
+
+    """
+    PURPOSE
+    -------
+    Concurrently pushes a list of exec-mode CLI commands to all devices in the
+    supplied DataFrame using a thread pool. Each device is handled independently
+    by push_commands.
+
+
+    ARGUMENTS
+    ---------
+    selected_df (pd.DataFrame): DataFrame of the devices selected by the user.
+                                Must contain 'OOBM IP Address' and 'Hostname'.
+    username    (str):          Device SSH username.
+    password    (str):          Device SSH password.
+    commands    (list[str]):    Ordered list of exec-mode CLI commands to send.
+
+
+    RETURN VALUE
+    ------------
+    List of (index, result) tuples — one per device.
+    index matches the original DataFrame index for identification.
+    """
+
+    results = []
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+
+        futures = {
+            executor.submit(push_commands, row, username, password, commands): row['Hostname']
+            for _, row in selected_df.iterrows()
+        }
+
+        for future in as_completed(futures):
+            hostname = futures[future]
+            try:
+                index, result = future.result()
+                results.append((index, result))
+                #-------------------------------------------------
+                logger.info(f"'{hostname}' push result: {result}")
+                #-------------------------------------------------
+            except Exception as e:
+                #----------------------------------------------------------------------
+                logger.error(f"Unexpected error pushing commands to '{hostname}': {e}")
+                #----------------------------------------------------------------------
 
     return results

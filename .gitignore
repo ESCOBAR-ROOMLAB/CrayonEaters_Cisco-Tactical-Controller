@@ -17,9 +17,11 @@ test.py
 # --- The logging file ---
 execution_logs.log
 
-# Documentation not relevant
+# Documentation not relevant (mostly personal things)
 documentation/Ideas.txt
 documentation/Objectives.txt
+documentation/to_do.txt
+documentation/v1.2_changes.txt
 
 # VS-Code Workspace
 CrayonEaters_Tactical-CiscoIOS-Controller.code-workspace
